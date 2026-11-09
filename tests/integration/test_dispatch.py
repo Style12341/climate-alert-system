@@ -291,7 +291,9 @@ async def test_channels_fail_independently(
     await dispatch(sessions, senders, settings)
 
     assert (await stored(sessions, whatsapp.id)).status == "sent"
-    assert (await stored(sessions, email.id)).status == "pending"
+    failed_once = await stored(sessions, email.id)
+    assert failed_once.status == "pending"
+    assert failed_once.last_error == DeliveryFailure.FAILED.message
 
     await expire_leases(sessions)
     email_sender.error = None
