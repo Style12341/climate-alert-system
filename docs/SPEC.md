@@ -1,5 +1,7 @@
 # Climate Alert System: Technical Specification
 
+> Working document, written before implementation. PRD and SPEC were updated while the system was built; continuous integration was added afterwards as the standard gate for a production repository (see [`operacion.md`](operacion.md#integración-continua)). Where this document and the code differ, the code and [`Decisiones.md`](Decisiones.md) are authoritative.
+
 **Status:** final · **Date:** 2026-11-08 · **Implements:** [`PRD.md`](PRD.md)
 
 This document says how the system is built. The schema and its diagrams are in [`ModeloDeDatos.md`](ModeloDeDatos.md). The reasoning behind each choice is in [`Decisiones.md`](Decisiones.md). Neither is repeated here.
@@ -63,7 +65,7 @@ src/climate_alerts/
     dispatch.py          Claim, send, record outcomes
     senders.py           Sender protocol, simulated senders, registry
 migrations/              Alembic, async template
-scripts/                 License audit and volume benchmark
+scripts/                 claim_forms.sql, license_audit.py, smoke_test.sh, volume_benchmark.py
 collection/              Postman collection and environment, importable into Bruno
 tests/
 ```
@@ -86,7 +88,7 @@ tests/
 | Variable | Default | Why |
 |----------|---------|-----|
 | `JWT_ALGORITHM` | `HS256` | Pinned by configuration. One of `HS256`, `HS384` or `HS512` |
-| `EVALUATION_INTERVAL_SECONDS` | 300 | The measured worst case takes about 11 s |
+| `EVALUATION_INTERVAL_SECONDS` | 300 | The measured worst case takes 8.71 s |
 | `EVALUATION_CHUNK_SIZE` | 5000 | Benchmark |
 | `NOTIFICATION_CHANNELS` | `whatsapp` | Comma-separated. Keeps measured volumes valid |
 | `DISPATCH_INTERVAL_SECONDS` | 5 | Upper bound on delivery latency when idle |
@@ -97,14 +99,14 @@ tests/
 | `DISPATCH_MAX_ATTEMPTS` | 8 | With the backoff below, retries span 1 to 2 hours, outlasting a provider outage of about an hour |
 | `DISPATCH_BACKOFF_BASE_SECONDS` | 60 | |
 | `DISPATCH_BACKOFF_CAP_SECONDS` | 3600 | |
-| `DEFAULT_PAGE_SIZE`, `MAX_PAGE_SIZE` | 50, 200 | |
 | `DB_POOL_SIZE`, `DB_MAX_OVERFLOW` | 5, 5 | |
 | `DB_COMMAND_TIMEOUT_SECONDS` | 60 | Without it, a query on a vanished host never returns, and `max_instances=1` then skips every later run |
 | `WORKER_SHUTDOWN_TIMEOUT_SECONDS` | 25 | Below Compose's `stop_grace_period: 30s` |
-| `SEED_TOKEN_TTL_HOURS` | 24 | Reviewer convenience. Production tokens would be short-lived |
 | `LOG_LEVEL` | `INFO` | One of `CRITICAL`, `ERROR`, `WARNING`, `INFO` or `DEBUG` |
 
-Startup also validates that every enabled channel has a registered sender. Counts, sizes, timeouts and intervals must be positive (`DB_MAX_OVERFLOW` may be 0), `DEFAULT_PAGE_SIZE` may not exceed `MAX_PAGE_SIZE`, and `DISPATCH_LEASE_SECONDS` must exceed `DISPATCH_BATCH_SIZE / DISPATCH_CONCURRENCY × DISPATCH_SEND_TIMEOUT_SECONDS`.
+Two values are fixed in code rather than configured: the notifications page size (default 50, maximum 200, in the API) and the lifetime of the demo tokens printed by the seed (24 hours, a reviewer convenience; production tokens would be short-lived).
+
+Startup also validates that every enabled channel has a registered sender. Counts, sizes, timeouts and intervals must be positive (`DB_MAX_OVERFLOW` may be 0), and `DISPATCH_LEASE_SECONDS` must exceed `DISPATCH_BATCH_SIZE / DISPATCH_CONCURRENCY × DISPATCH_SEND_TIMEOUT_SECONDS`.
 
 ## 5. Data layer
 
@@ -118,7 +120,7 @@ Startup also validates that every enabled channel has a registered sender. Count
 
 Application queries use SQLAlchemy's 2.0-style expression language: `select()`, `insert()`, `update()`, `session.execute()` and `session.scalars()`. Models use `DeclarativeBase`, `Mapped[]` and `mapped_column()`.
 
-Not allowed in application code: `text()`, `session.query()`, `declarative_base()`, `select([...])` and any other legacy or deprecated API. Ruff bans the legacy imports through `TID251`, a unit test rejects `.query(` calls, and pytest turns deprecation warnings into errors. Migrations and tests may use `text()`.
+Not allowed in application code: `text()`, `session.query()`, `declarative_base()`, `select([...])` and any other legacy or deprecated API. Ruff bans the legacy imports through `TID251`, mypy rejects `.query()` calls because `AsyncSession` has no such method, and pytest turns deprecation warnings into errors. Migrations and tests may use `text()`.
 
 PostgreSQL features come from the same language: `postgresql.insert(...).from_select(...).on_conflict_do_nothing(constraint=...)`, `with_for_update(skip_locked=True)`, `any_(func.array(...))`, an `update(...).returning(...)` whose `where` references other tables (rendered as `UPDATE ... FROM`), and `func.unnest(...).table_valued("channel").render_derived(name="c")`.
 
@@ -154,10 +156,10 @@ Business routes are under `/api/v1` and require a token.
 
 Errors keep FastAPI's standard shape, with one addition: a stable, machine-readable `code` in snake_case.
 
-**Rule.** Internal errors are logged, never returned to the client. No response body or header carries an exception's message or class name, a traceback, SQL, a driver message or internal configuration. The only texts a client sees are fixed ones: a message from `errors.py`, including the `DeliveryFailure` messages in `last_error`; `api/errors.py`'s "Internal server error"; the `HTTPException` details of FastAPI and Starlette, such as "Not authenticated", "Not Found" and "Method Not Allowed"; pydantic's validation messages, built from the schema and never from the rejected value; and the notifications router's `limit_too_large` message, "Limit must be at most N", where N is the configured maximum.
+**Rule.** Internal errors are logged, never returned to the client. No response body or header carries an exception's message or class name, a traceback, SQL, a driver message or internal configuration. The only texts a client sees are fixed ones: a message from `errors.py`, including the `DeliveryFailure` messages in `last_error`; `api/errors.py`'s "Internal server error"; the `HTTPException` details of FastAPI and Starlette, such as "Not authenticated", "Not Found" and "Method Not Allowed"; and pydantic's validation messages, built from the schema and never from the rejected value.
 
 - **HTTP errors:** `{"detail": "<message>", "code": "<code>"}`, declared in the OpenAPI document as `ErrorOut`. Messages are English, sentence case, without a trailing period, and never carry a value from the request or the database.
-- **Validation errors:** a `422` whose `detail` is a list of objects with only `type`, `loc` and `msg`. Runtime checks use the same shape: an unknown event has `type` `unknown_event_type` at `loc` `["body", "event_type"]`, and `limit` above the maximum has `type` `limit_too_large` at `["query", "limit"]`.
+- **Validation errors:** a `422` whose `detail` is a list of objects with only `type`, `loc` and `msg`. Runtime checks use the same shape: an unknown event has `type` `unknown_event_type` at `loc` `["body", "event_type"]`. A `limit` above the maximum is a standard pydantic error: `{"detail":[{"type":"less_than_equal","loc":["query","limit"],"msg":"Input should be less than or equal to 200"}]}`.
 
 **Catalog.** `errors.py` defines `DomainError` and every application error, each with a `code` and a `message`. It knows nothing about HTTP. Services and `auth.verify_token` raise these errors, and routers do not catch them. Nothing outside the API layer imports FastAPI or Starlette, which a unit test enforces.
 
@@ -209,7 +211,7 @@ Errors keep FastAPI's standard shape, with one addition: a stable, machine-reada
 
 **Ownership.** Every statement joins through `fields.owner_id`. Deleted alerts are invisible, so a second `DELETE` returns `404`.
 
-**Pagination.** Newest first by `id`. `cursor` is the last `id` seen, and the query fetches `limit + 1` rows to compute `next_cursor`. `limit` above `MAX_PAGE_SIZE` returns `422`.
+**Pagination.** Newest first by `id`. `cursor` is the last `id` seen, and the query fetches `limit + 1` rows to compute `next_cursor`. `limit` defaults to 50, and a value above 200 returns `422`.
 
 ## 8. Evaluation
 
@@ -261,7 +263,7 @@ delay = min(cap, base × 2^(attempts - 1)) × uniform(0.5, 1.0)
 | `ATTEMPTS_EXHAUSTED` | `attempts_exhausted` | Delivery attempts exhausted |
 | `FAILED` | `delivery_failed` | Delivery failed |
 
-**Reprocessing.** A `failed` notification can be requeued with one `UPDATE`, documented in the README. There is no endpoint.
+**Reprocessing.** A `failed` notification can be requeued with one `UPDATE`, documented in [`operacion.md`](operacion.md#reencolar-una-notificación-fallida). There is no endpoint.
 
 ### Senders
 
@@ -351,7 +353,8 @@ JSON logs through structlog, with no phone numbers or emails. Standard library l
 |-------|--------|
 | `evaluation.completed` | `created`, `chunks`, `failed_chunks`, `duration_ms` |
 | `dispatch.completed` | `claimed`, `sent`, `retried`, `failed`, `duration_ms` |
-| `worker.stopping`, `worker.stopped` | `drained` |
+| `worker.stopping` | None |
+| `worker.stopped` | `drained` |
 | `evaluation.chunk_failed` (warning) | `after_id`, `up_to_id` (the chunk's alert id range), `error_type`. Never the message |
 | `notification.simulated_send` | `notification_id`, `channel`, `to` (masked: `***` and the last four digits of a phone, or the first letter of an email and `***@***`), `field_name`, `event_type`, `forecast_date`, `probability`, `threshold` |
 | `worker.job_failed` (error) | `job` (`evaluation` or `dispatch`), `error_type`. Never the message |
@@ -365,12 +368,11 @@ Multi-stage build with uv on `python:3.14-slim`, running as a non-root user. Com
 
 ## 15. Delivery of the work
 
-- Initialize git at the start of implementation. Conventional commits only, with no AI attribution.
 - Implementation order: project skeleton, schema and migration, auth and API, evaluation, dispatch, worker, seed, Compose, API collection, verification, documentation.
-- Move the license audit and benchmark scripts from the scratchpad into `scripts/`.
-- Update `README.md`, `procedimiento.md` and `Decisiones.md` as each part lands.
+- `README.md`, `procedimiento.md` and `Decisiones.md` are updated as each part lands.
+- The four helper files live in `scripts/`: `claim_forms.sql`, `license_audit.py`, `smoke_test.sh` and `volume_benchmark.py`.
 
-Out of scope, not needed by the statement: CI pipelines and a published container image.
+Out of scope when this was specified, not needed by the statement: CI pipelines and a published container image. CI was added afterwards as the standard gate for a production repository, see [`operacion.md`](operacion.md#integración-continua). No container image is published.
 
 ## 16. Manual API collection
 

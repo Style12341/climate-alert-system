@@ -1,5 +1,7 @@
 # Climate Alert System: Product Requirements
 
+> Working document, written before implementation. PRD and SPEC were updated while the system was built; continuous integration was added afterwards as the standard gate for a production repository (see [`operacion.md`](operacion.md#integración-continua)). Where this document and the code differ, the code and [`Decisiones.md`](Decisiones.md) are authoritative.
+
 **Status:** final · **Date:** 2026-11-08 · **Source of truth:** [`statement.md`](../statement.md)
 
 Producers configure alerts on their fields, choosing a climate event and a probability threshold. A background job compares stored forecasts against those thresholds, and the system notifies the owner when one is reached. The system must be small, production grade, and honest about what it leaves out.
@@ -98,7 +100,7 @@ Agrobot is a farm management system with a WhatsApp interface, built on Python, 
 | Async | All I/O is non-blocking: async FastAPI endpoints, SQLAlchemy `AsyncSession` and an async driver. The worker runs on one event loop with APScheduler 3.x (`<4`) |
 | Durability | A notification is committed before any send attempt. Delivery is at least once |
 | Concurrency | Correctness never depends on running a single worker. Guarantees live in database constraints |
-| Scale | Designed for 24,000 farms, 2.69M forecast rows and 72,000 alerts with one enabled channel, as measured in decision 12 |
+| Scale | Designed for 24,000 farms, 2.69M forecast rows and 72,000 alerts with one enabled channel, as measured in decision 10 |
 | Memory | Evaluation brings no candidate rows into Python. The dispatcher holds at most one batch |
 | Data integrity | Every rule listed in `ModeloDeDatos.md` is enforced by the database |
 | Configuration | Operating values have defaults in code and environment overrides. Secrets have no default, and the app refuses to start without them |
@@ -107,7 +109,7 @@ Agrobot is a farm management system with a WhatsApp interface, built on Python, 
 | Shutdown | The worker stops cleanly on `SIGTERM`. Any interrupted work is recovered by rollback or lease expiry |
 | Design | Organized by feature. Abstractions exist only where several implementations are expected, which today means the per-channel sender |
 | Queries | Built with SQLAlchemy's modern 2.0-style expression language. No raw SQL or legacy APIs in application code, enforced by lint and by failing on deprecation warnings |
-| Language | Code and identifiers in English. `README.md`, `procedimiento.md`, `Decisiones.md` and `ModeloDeDatos.md` in Spanish |
+| Language | Code and identifiers in English. `README.md`, `procedimiento.md`, `Decisiones.md`, `ModeloDeDatos.md` and `operacion.md` in Spanish |
 
 ## 6. Edge cases
 
@@ -146,32 +148,25 @@ The full table is in `Decisiones.md`. These must be covered by tests:
 
 ## 8. Definition of done
 
-- [ ] Every requirement in section 4 is implemented and covered by a test.
-- [ ] Every edge case in section 6 has a test.
-- [ ] `docker compose up` on a clean machine produces notifications without manual steps.
-- [ ] The API collection passes against that running system, and imports into Bruno.
-- [ ] Migrations upgrade and downgrade from an empty database, and `alembic check` reports no drift.
-- [ ] Lint, type checks and the test suite pass.
-- [ ] The README lets a reviewer run the system and find the main decisions.
+- [x] Every requirement in section 4 is implemented and covered by a test. FR-25 and FR-29 are covered by the CI `dast` job, which starts the stack and runs the collection, rather than by pytest.
+- [x] Every edge case in section 6 has a test.
+- [x] `docker compose up` on a clean machine produces notifications without manual steps. `scripts/smoke_test.sh` checks it in CI.
+- [x] The API collection passes against that running system, and imports into Bruno. The Bruno import was checked with its official converter, not run inside the application.
+- [x] Migrations upgrade and downgrade from an empty database, and `alembic check` reports no drift.
+- [x] Lint, type checks and the test suite pass.
+- [x] The README lets a reviewer run the system and find the main decisions.
 
 ## 9. Verifications carried into implementation
 
-Status of the gaps recorded before implementation. Details are in `Decisiones.md`, decisions 3 and 12.
+Status of the gaps recorded before implementation. Details are in `Decisiones.md`, decisions 2 and 10.
 
 - **Resolved.** The final evaluation statement was measured at full scale: 1,152,000 rows in 15 chunks took 8.71 s, slowest chunk 0.64 s, 463 MiB of WAL, in line with the earlier 10.0 s.
 - **Resolved.** The final claim was measured on 1,152,000 rows: no batch exceeded 500, and every row ended `sent`. The drain took 863 s against the earlier 34 to 40 s: the claim took 24.0 s and `record_outcomes` 836.9 s. The earlier spike recorded each batch with one `UPDATE`, while `record_outcomes` runs one per row. It is about 1,335 rows per second, still above the provider limit. An earlier run with the claim in a `MATERIALIZED` CTE took 917 s but did not split the time between the two steps.
 - **Still open.** Sustained queue behaviour is unmeasured. Autovacuum ran 7 times on `notifications` during the final drain, but that is one 14-minute run.
 - **Resolved.** All five Mermaid diagrams in `ModeloDeDatos.md` were rendered and checked. The state diagram had overlapping labels and now runs left to right with a shorter label.
 - **Resolved.** The full dependency tree was audited: 52 packages, none without a declared license, no copyleft at runtime, and two MPL-2.0 packages used only in development (`certifi` and `pathspec`).
-- **Resolved.** Both scripts are in `scripts/`.
+- **Resolved.** The four helper files are in `scripts/`: `claim_forms.sql`, `license_audit.py`, `smoke_test.sh` and `volume_benchmark.py`.
 
 ## 10. Values decided in the specification
 
 Evaluation and dispatch intervals, lease duration, maximum attempts, backoff base and cap, send concurrency, page size limit, token lifetime in the seed, and the seeded event types.
-
-## 11. Next steps
-
-1. Review and approve this PRD.
-2. Write the technical specification.
-3. Write the implementation plan.
-4. Implement, verify and review.
