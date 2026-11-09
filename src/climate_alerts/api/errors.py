@@ -7,6 +7,7 @@ FastAPI's list shape, `{"detail": [{"type", "loc", "msg"}]}`.
 import http
 import json
 import re
+import traceback
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -26,31 +27,38 @@ logger = structlog.get_logger()
 
 
 @dataclass(frozen=True)
-class HttpError:
-    """The response for one `DomainError`.
+class ErrorStatus:
+    """The HTTP status of one `DomainError`, and whether it is a field check.
 
-    With `loc`, the error is a failed check on that request field, and it is
-    rendered in the validation list shape so that every 422 has one shape.
+    Without `loc`, the error renders as `{"detail", "code"}` and
+    `error_responses` lists it in `/docs`. With `loc`, it is a failed check on
+    that request field: it renders in the validation list shape, so that every
+    422 has one shape, and `/docs` does not list it as a JSON error, because
+    FastAPI's own validation 422 already documents that shape.
     """
 
     status: int
     loc: tuple[str, ...] | None = None
 
 
-HTTP_ERRORS: dict[type[DomainError], HttpError] = {
-    errors.FieldNotFound: HttpError(status.HTTP_404_NOT_FOUND),
-    errors.AlertNotFound: HttpError(status.HTTP_404_NOT_FOUND),
-    errors.AlertAlreadyExists: HttpError(status.HTTP_409_CONFLICT),
-    errors.UnknownEventType: HttpError(
+HTTP_ERRORS: dict[type[DomainError], ErrorStatus] = {
+    errors.FieldNotFound: ErrorStatus(status.HTTP_404_NOT_FOUND),
+    errors.AlertNotFound: ErrorStatus(status.HTTP_404_NOT_FOUND),
+    errors.AlertAlreadyExists: ErrorStatus(status.HTTP_409_CONFLICT),
+    errors.UnknownEventType: ErrorStatus(
         status.HTTP_422_UNPROCESSABLE_CONTENT, loc=("body", "event_type")
     ),
-    errors.InvalidCredentials: HttpError(status.HTTP_401_UNAUTHORIZED),
-    errors.DatabaseUnavailable: HttpError(status.HTTP_503_SERVICE_UNAVAILABLE),
+    errors.InvalidCredentials: ErrorStatus(status.HTTP_401_UNAUTHORIZED),
+    errors.DatabaseUnavailable: ErrorStatus(status.HTTP_503_SERVICE_UNAVAILABLE),
 }
 
 _BEARER_CHALLENGE = {"WWW-Authenticate": "Bearer"}
 
 _INTERNAL_ERROR = {"detail": "Internal server error", "code": "internal_error"}
+
+# HTTPBearer's own 401 when the header is missing, which `handle_http_exception`
+# renders. Every route that takes a token can return it next to the catalog's.
+_MISSING_TOKEN = {"detail": "Not authenticated", "code": "unauthorized"}
 
 
 def _validation_response(issues: Iterable[Mapping[str, Any]]) -> Response:
@@ -79,6 +87,26 @@ def _status_code_name(status_code: int) -> str:
     """`404` -> `not_found`, from the standard reason phrase."""
     phrase = http.HTTPStatus(status_code).phrase
     return re.sub(r"[^a-z0-9]+", "_", phrase.lower()).strip("_")
+
+
+def _error_context(exc: Exception, scope: Scope) -> dict[str, str]:
+    """Where an unhandled error happened, without any request or database value.
+
+    Never the message or a traceback: the message can carry request values,
+    and a database error's chained asyncpg exception appends PostgreSQL's
+    DETAIL line, with the value a constraint rejected. Never the raw path
+    either: it holds ids. The route's path template holds none.
+    """
+    context = {"error_type": type(exc).__name__}
+    frames = traceback.extract_tb(exc.__traceback__)
+    if frames:
+        frame = frames[-1]
+        context["error_location"] = f"{frame.filename}:{frame.lineno}:{frame.name}"
+    context["method"] = scope["method"]
+    route = scope.get("route")
+    if route is not None and hasattr(route, "path"):
+        context["route"] = route.path
+    return context
 
 
 class _UnhandledErrorMiddleware:
@@ -112,8 +140,7 @@ class _UnhandledErrorMiddleware:
         except Exception as exc:
             if response_started:
                 raise
-            # The type only: the message can carry request or database values.
-            logger.error("api.unhandled_error", error_type=type(exc).__name__)
+            logger.error("api.unhandled_error", **_error_context(exc, scope))
             response = JSONResponse(
                 _INTERNAL_ERROR, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
@@ -158,34 +185,37 @@ def register_error_handlers(app: FastAPI) -> None:
     app.add_middleware(_UnhandledErrorMiddleware)
 
 
-def error_responses(*catalog: type[DomainError]) -> dict[int | str, dict[str, Any]]:
+def error_responses(*errors: type[DomainError]) -> dict[int | str, dict[str, Any]]:
     """The OpenAPI `responses` for the errors a route can return.
 
     Status, description and example code come from the catalog. Errors that
     render as a field validation failure add nothing: FastAPI documents the
     validation 422 itself, and declaring 422 here would replace that entry.
+    A 401 also lists HTTPBearer's missing-token error, which is not in the
+    catalog.
     """
-    by_status: dict[int, list[type[DomainError]]] = {}
-    for error in catalog:
+    by_status: dict[int, list[dict[str, str]]] = {}
+    for error in errors:
         mapping = HTTP_ERRORS[error]
         if mapping.loc is None:
-            by_status.setdefault(mapping.status, []).append(error)
+            by_status.setdefault(mapping.status, []).append(
+                {"detail": error.message, "code": error.code}
+            )
+    if status.HTTP_401_UNAUTHORIZED in by_status:
+        by_status[status.HTTP_401_UNAUTHORIZED].insert(0, dict(_MISSING_TOKEN))
 
     return {
         status_code: {
             "model": ErrorOut,
-            "description": "; ".join(error.message for error in group),
+            "description": "; ".join(body["detail"] for body in bodies),
             "content": {
                 "application/json": {
                     "examples": {
-                        error.code: {
-                            "summary": error.message,
-                            "value": {"detail": error.message, "code": error.code},
-                        }
-                        for error in group
+                        body["code"]: {"summary": body["detail"], "value": body}
+                        for body in bodies
                     }
                 }
             },
         }
-        for status_code, group in by_status.items()
+        for status_code, bodies in by_status.items()
     }

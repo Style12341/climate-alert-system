@@ -90,10 +90,12 @@ async def test_unhandled_error_returns_a_generic_500(settings: Settings) -> None
     app = create_app(settings)
     secret = "+5491100000000 password=hunter2"
 
-    async def explode() -> None:
+    async def explode(item_id: str) -> None:
         raise RuntimeError(secret)
 
-    app.add_api_route("/explode", explode)
+    explode_line = explode.__code__.co_firstlineno + 1
+
+    app.add_api_route("/explode/{item_id}", explode)
 
     # The transport re-raises any exception that escapes the app, so reaching
     # the assertions also proves the server would not log it a second time.
@@ -101,7 +103,7 @@ async def test_unhandled_error_returns_a_generic_500(settings: Settings) -> None
         async with LifespanManager(app) as manager:
             transport = ASGITransport(app=manager.app)
             async with AsyncClient(transport=transport, base_url="http://test") as http:
-                response = await http.get("/explode")
+                response = await http.get("/explode/raw-path-value")
 
     assert response.status_code == 500
     assert response.json() == {
@@ -113,9 +115,15 @@ async def test_unhandled_error_returns_a_generic_500(settings: Settings) -> None
         {
             "event": "api.unhandled_error",
             "error_type": "RuntimeError",
+            "error_location": f"{__file__}:{explode_line}:explode",
+            "method": "GET",
+            "route": "/explode/{item_id}",
             "log_level": "error",
         }
     ]
+    logged = repr(logs)
+    assert "hunter2" not in logged
+    assert "raw-path-value" not in logged
 
 
 async def test_catalog_lists_events(
@@ -201,6 +209,10 @@ async def test_openapi_declares_the_error_contract(client: AsyncClient) -> None:
     assert "503" in responses["get", "/health/ready"]
 
 
+# A missing header is HTTPBearer's 401; a bad token is the catalog's.
+UNAUTHORIZED_CODES = {"unauthorized", "invalid_credentials"}
+
+
 def documented_codes(operation: dict[str, Any]) -> dict[str, set[str]]:
     return {
         status: set(response["content"]["application/json"].get("examples", {}))
@@ -215,21 +227,25 @@ async def test_openapi_documents_the_codes_each_route_returns(
     paths = (await client.get("/openapi.json")).json()["paths"]
 
     assert documented_codes(paths["/api/v1/fields/{field_id}/alerts"]["post"]) == {
-        "401": {"invalid_credentials"},
+        "401": UNAUTHORIZED_CODES,
         "404": {"field_not_found"},
         "409": {"alert_already_exists"},
     }
     for method in ("get", "patch", "delete"):
         assert documented_codes(paths["/api/v1/alerts/{alert_id}"][method]) == {
-            "401": {"invalid_credentials"},
+            "401": UNAUTHORIZED_CODES,
             "404": {"alert_not_found"},
         }
     assert documented_codes(paths["/api/v1/alerts"]["get"]) == {
-        "401": {"invalid_credentials"}
+        "401": UNAUTHORIZED_CODES
     }
     assert documented_codes(paths["/health/ready"]["get"]) == {
         "503": {"database_unavailable"}
     }
+    unauthorized = paths["/api/v1/alerts"]["get"]["responses"]["401"]
+    assert unauthorized["content"]["application/json"]["examples"]["unauthorized"][
+        "value"
+    ] == {"detail": "Not authenticated", "code": "unauthorized"}
     example = paths["/api/v1/alerts/{alert_id}"]["get"]["responses"]["404"]
     assert example["description"] == "Alert not found"
     assert example["content"]["application/json"]["examples"]["alert_not_found"][
