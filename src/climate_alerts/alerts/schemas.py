@@ -4,14 +4,15 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from climate_alerts.api.dependencies import NO_NUL_PATTERN
+
 Threshold = Annotated[Decimal, Field(gt=0, le=100, max_digits=5, decimal_places=2)]
 
 
 class AlertCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # PostgreSQL text cannot hold NUL, so the catalog lookup would raise a 500.
-    event_type: str = Field(pattern=r"^[^\x00]*$")
+    event_type: str = Field(pattern=NO_NUL_PATTERN)
     threshold: Threshold
 
 

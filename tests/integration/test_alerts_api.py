@@ -4,8 +4,6 @@ from datetime import datetime
 from decimal import Decimal
 
 import pytest
-from fastapi import FastAPI
-from fastapi.exceptions import RequestValidationError
 from httpx import AsyncClient
 from sqlalchemy import select
 
@@ -88,6 +86,15 @@ async def test_unknown_event_returns_422(
     )
 
     assert response.status_code == 422
+    assert response.json() == {
+        "detail": [
+            {
+                "type": "value_error",
+                "loc": ["body", "event_type"],
+                "msg": "Unknown event type",
+            }
+        ]
+    }
 
 
 async def test_event_type_with_nul_byte_returns_422(
@@ -370,8 +377,7 @@ async def test_oversized_path_id_returns_422(
 def assert_clean_validation_body(body: dict[str, list[dict[str, object]]]) -> None:
     assert body["detail"]
     for error in body["detail"]:
-        assert {"type", "loc", "msg"} <= set(error)
-        assert "input" not in error
+        assert set(error) == {"type", "loc", "msg"}
 
 
 # Each body parses to inf, nan or a lone surrogate, which Pydantic rejects and
@@ -449,51 +455,6 @@ async def test_validation_error_keeps_fastapi_shape(
                 "type": "greater_than",
                 "loc": ["body", "threshold"],
                 "msg": "Input should be greater than 0",
-                "ctx": {"gt": 0},
             }
         ]
     }
-
-
-class Opaque:
-    __slots__ = ()
-
-    def __str__(self) -> str:
-        return "opaque"
-
-
-async def test_unserializable_ctx_does_not_break_the_response(
-    app: FastAPI, client: AsyncClient
-) -> None:
-    async def fail() -> None:
-        raise RequestValidationError(
-            [
-                {
-                    "type": "value_error",
-                    "loc": ["body", "\ud800"],
-                    "msg": "bad \ud800",
-                    "input": float("inf"),
-                    "ctx": {
-                        "opaque": Opaque(),
-                        "infinite": float("inf"),
-                        "decimal": Decimal("Infinity"),
-                        "error": ValueError("boom"),
-                        "limit": Decimal("100"),
-                    },
-                }
-            ]
-        )
-
-    app.add_api_route("/boom", fail)
-
-    response = await client.get("/boom")
-
-    assert response.status_code == 422
-    error = response.json()["detail"][0]
-    assert "input" not in error
-    assert error["loc"] == ["body", "\\ud800"]
-    assert error["msg"] == "bad \\ud800"
-    assert error["ctx"]["opaque"] == "opaque"
-    assert error["ctx"]["infinite"] == "inf"
-    assert error["ctx"]["decimal"] == "inf"
-    assert error["ctx"]["limit"] == 100

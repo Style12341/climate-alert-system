@@ -3,8 +3,9 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
 from climate_alerts.api.dependencies import SessionDep
+from climate_alerts.api.schemas import UNAVAILABLE
 
-router = APIRouter(prefix="/health")
+router = APIRouter(prefix="/health", tags=["health"])
 
 
 @router.get("/live")
@@ -12,7 +13,7 @@ async def live() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@router.get("/ready")
+@router.get("/ready", responses=UNAVAILABLE)
 async def ready(session: SessionDep) -> dict[str, str]:
     # Broad on purpose: connection failures surface as raw OSError or asyncpg
     # exceptions rather than SQLAlchemyError, and any failure means not ready.

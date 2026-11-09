@@ -3,6 +3,8 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict
 
+from climate_alerts.notifications.models import NotificationStatus
+
 
 class NotificationOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -15,7 +17,7 @@ class NotificationOut(BaseModel):
     channel: str
     probability: Decimal
     threshold: Decimal
-    status: str
+    status: NotificationStatus
     attempts: int
     last_error: str | None
     created_at: datetime

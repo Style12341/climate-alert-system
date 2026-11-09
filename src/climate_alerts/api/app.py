@@ -1,11 +1,9 @@
-import math
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, status
-from fastapi.encoders import jsonable_encoder
+from fastapi import FastAPI, Request, Response, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
 
 from climate_alerts.agrobot.router import router as agrobot_router
 from climate_alerts.alerts.router import router as alerts_router
@@ -16,38 +14,21 @@ from climate_alerts.logs import configure_logging
 from climate_alerts.notifications.router import router as notifications_router
 
 
-def _renderable(value: object) -> object:
-    """Reduce a validation error value to something JSON can always render.
+def _validation_error_body(exc: RequestValidationError) -> str:
+    """Render only `type`, `loc` and `msg`.
 
-    A lone surrogate cannot be encoded as UTF-8 and a non-finite float is not
-    JSON. Both reach here from request bodies, including through `loc` when
-    they are a body key, so each is replaced by readable text.
+    `input` and `ctx` can hold the rejected value, and that value may be what
+    JSON cannot represent: a non-finite float, or a lone surrogate. `json.dumps`
+    escapes surrogates, which an encoder writing UTF-8 would fail on.
     """
-    if isinstance(value, str):
-        return value.encode("utf-8", "backslashreplace").decode("utf-8")
-    if isinstance(value, float) and not math.isfinite(value):
-        return str(value)
-    if value is None or isinstance(value, bool | int | float):
-        return value
-    if isinstance(value, dict):
-        return {_renderable(str(k)): _renderable(v) for k, v in value.items()}
-    if isinstance(value, list | tuple):
-        return [_renderable(item) for item in value]
-    try:
-        return _renderable(jsonable_encoder(value))
-    except TypeError, ValueError:
-        return _renderable(str(value))
-
-
-def _validation_error_body(exc: RequestValidationError) -> dict[str, object]:
-    # `input` is dropped because echoing it is what makes rendering fail: the
-    # rejected value is exactly the one JSON cannot represent.
-    return {
-        "detail": [
-            _renderable({k: v for k, v in error.items() if k != "input"})
-            for error in exc.errors()
-        ]
-    }
+    return json.dumps(
+        {
+            "detail": [
+                {"type": error["type"], "loc": error["loc"], "msg": error["msg"]}
+                for error in exc.errors()
+            ]
+        }
+    )
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -68,9 +49,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.exception_handler(RequestValidationError)
     async def handle_validation_error(
         _request: Request, exc: RequestValidationError
-    ) -> JSONResponse:
-        return JSONResponse(
+    ) -> Response:
+        return Response(
             _validation_error_body(exc),
+            media_type="application/json",
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         )
 

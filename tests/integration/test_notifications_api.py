@@ -209,6 +209,15 @@ async def test_limit_above_maximum_returns_422(
     )
 
     assert response.status_code == 422
+    assert response.json() == {
+        "detail": [
+            {
+                "type": "value_error",
+                "loc": ["query", "limit"],
+                "msg": "limit must be at most 200",
+            }
+        ]
+    }
 
 
 async def test_page_size_comes_from_settings(
