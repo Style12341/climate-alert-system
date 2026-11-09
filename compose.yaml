@@ -55,7 +55,7 @@ services:
 
   api:
     <<: *build
-    command: ["uvicorn", "--factory", "climate_alerts.api.app:create_app", "--host", "0.0.0.0", "--port", "8000"]
+    command: ["uvicorn", "--factory", "climate_alerts.api.app:create_app", "--no-server-header", "--host", "0.0.0.0", "--port", "8000"]
     environment:
       <<: *app-environment
     ports:

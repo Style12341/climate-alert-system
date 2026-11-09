@@ -5,8 +5,13 @@ response. Messages are English, sentence case and without a trailing period,
 like FastAPI's own, and must never carry a value from the request or the
 database.
 
-Internal errors are logged, never returned to the client: a client only ever
-sees a message from this module.
+Internal errors are logged, never returned to the client. The only texts a
+client sees are fixed ones: a message from this module, `last_error` included;
+`api/errors.py`'s "Internal server error"; the `HTTPException` details of
+FastAPI and Starlette, such as "Not authenticated", "Not Found" and "Method Not
+Allowed"; pydantic's validation messages, built from the schema and never
+from the rejected value; and the notifications router's `limit_too_large`
+message.
 """
 
 from enum import Enum

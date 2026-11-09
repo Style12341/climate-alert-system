@@ -12,7 +12,7 @@ Four processes run from one image, against one PostgreSQL database.
 |---------|-------------|----------|
 | `migrate` | `alembic upgrade head` | One-shot |
 | `seed` | `python -m climate_alerts.agrobot.seed` | One-shot |
-| `api` | `uvicorn --factory climate_alerts.api.app:create_app` | Long-running |
+| `api` | `uvicorn --factory climate_alerts.api.app:create_app --no-server-header` | Long-running |
 | `worker` | `python -m climate_alerts.worker` | Long-running |
 
 Docker Compose starts them in this order: `db` healthy (`pg_isready`), then `migrate`, then `seed`, then `api` and `worker`, using `service_healthy` and `service_completed_successfully`. All containers use exec-form commands so they receive `SIGTERM`.
@@ -155,7 +155,7 @@ Business routes are under `/api/v1` and require a token.
 
 Errors keep FastAPI's standard shape, with one addition: a stable, machine-readable `code` in snake_case.
 
-**Rule.** Internal errors are logged, never returned to the client. No response body or header carries an exception's message or class name, a traceback, SQL, a driver message or internal configuration. A client only sees a message from `errors.py` or a fixed message from FastAPI and Starlette.
+**Rule.** Internal errors are logged, never returned to the client. No response body or header carries an exception's message or class name, a traceback, SQL, a driver message or internal configuration. The only texts a client sees are fixed ones: a message from `errors.py`, including the `DeliveryFailure` messages in `last_error`; `api/errors.py`'s "Internal server error"; the `HTTPException` details of FastAPI and Starlette, such as "Not authenticated", "Not Found" and "Method Not Allowed"; pydantic's validation messages, built from the schema and never from the rejected value; and the notifications router's `limit_too_large` message, "Limit must be at most N", where N is the configured maximum.
 
 - **HTTP errors:** `{"detail": "<message>", "code": "<code>"}`, declared in the OpenAPI document as `ErrorOut`. Messages are English, sentence case, without a trailing period, and never carry a value from the request or the database.
 - **Validation errors:** a `422` whose `detail` is a list of objects with only `type`, `loc` and `msg`. Runtime checks use the same shape: an unknown event has `type` `unknown_event_type` at `loc` `["body", "event_type"]`, and `limit` above the maximum has `type` `limit_too_large` at `["query", "limit"]`.
@@ -180,7 +180,7 @@ Errors keep FastAPI's standard shape, with one addition: a stable, machine-reada
 
 **Documentation.** Each route declares by hand the catalog errors it can return, and `error_responses(...)` builds its OpenAPI `responses`: status, description and an example per `code`, all from the error classes. A `401` also lists `HTTPBearer`'s missing-token example, `{"detail": "Not authenticated", "code": "unauthorized"}`, next to `invalid_credentials`. Errors in the validation shape add nothing, since FastAPI already documents the `422`.
 
-**Database errors.** The engine uses `hide_parameters=True`, which keeps bound values such as phone numbers and emails out of SQLAlchemy's own error messages and statement logs. It does not reach the driver's exception: the asyncpg dialect raises its error `from` the original asyncpg exception, so that exception stays chained, and its `str()` appends PostgreSQL's `DETAIL` line, for example `Key (phone)=(+549...) already exists`. A printed traceback can therefore still contain a constraint's value. That is why error logs record the exception type and location only, never the message or a traceback.
+**Database errors.** The engine uses `hide_parameters=True`, which keeps bound values such as phone numbers and emails out of SQLAlchemy's own error messages and statement logs. It does not reach the driver's exception: the asyncpg dialect raises its error `from` the original asyncpg exception, so that exception stays chained, and its `str()` appends PostgreSQL's `DETAIL` line, for example `Key (phone)=(+549...) already exists`. A printed traceback can therefore still contain a constraint's value. That is why error logs record the exception type and location only, never the message or a traceback. There is one exception: if the response has already started, the 500 middleware cannot send a JSON body, so it re-raises and uvicorn logs the error with its traceback. No route streams its response today, so this cannot happen.
 
 ### Routes
 
@@ -252,7 +252,7 @@ delay = min(cap, base × 2^(attempts - 1)) × uniform(0.5, 1.0)
 
 **Fencing.** Every outcome update includes `WHERE id = :id AND attempts = :attempts AND status = 'pending'`. A dispatcher whose lease expired cannot overwrite the result of the one that took over.
 
-**Delivery failure reasons.** `GET /api/v1/notifications` returns `last_error`, so it stores only a message from `DeliveryFailure` in `errors.py`, a fixed set with a stable code and an English message each. It never stores an exception's message, class name or traceback. Every failed attempt logs `dispatch.send_failed` (section 13).
+**Delivery failure reasons.** `GET /api/v1/notifications` returns `last_error`, so it stores only a message from `DeliveryFailure` in `errors.py`, a fixed set with a stable code and an English message each. It never stores an exception's message, class name or traceback. Rows written before these reasons existed can hold other text, so `notifications/service.py` returns any stored value that is not a `DeliveryFailure` message as the generic "Delivery failed". Every failed attempt logs `dispatch.send_failed` (section 13).
 
 | Member | `code` | Message |
 |--------|--------|---------|
@@ -353,6 +353,10 @@ JSON logs through structlog, with no phone numbers or emails. Standard library l
 | `evaluation.completed` | `created`, `chunks`, `failed_chunks`, `duration_ms` |
 | `dispatch.completed` | `claimed`, `sent`, `retried`, `failed`, `duration_ms` |
 | `worker.stopping`, `worker.stopped` | `drained` |
+| `evaluation.chunk_failed` (warning) | `after_id`, `up_to_id` (the chunk's alert id range), `error_type`. Never the message |
+| `notification.simulated_send` | `notification_id`, `channel`, `to` (masked: `***` and the last four digits of a phone, or the first letter of an email and `***@***`), `field_name`, `event_type`, `forecast_date`, `probability`, `threshold` |
+| `worker.job_failed` (error) | `job` (`evaluation` or `dispatch`), `error_type`. Never the message |
+| `health.ready_failed` (warning) | `error_type`. Never the message |
 | `dispatch.send_failed` | `notification_id`, `channel`, `reason` (the `DeliveryFailure` code), `error_type` when an exception caused it. Never the message |
 | `api.unhandled_error` | `error_type`, `error_location` (`file:line:function` of the innermost frame), `method`, `route` (the matched path template, when there is one). Never the message, a traceback or the raw path |
 

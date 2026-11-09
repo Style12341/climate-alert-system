@@ -45,7 +45,7 @@ Hacen falta [uv](https://docs.astral.sh/uv/) y un PostgreSQL 17 con una base y u
    ```bash
    uv run alembic upgrade head
    uv run python -m climate_alerts.agrobot.seed
-   uv run uvicorn --factory climate_alerts.api.app:create_app
+   uv run uvicorn --factory climate_alerts.api.app:create_app --no-server-header
    uv run python -m climate_alerts.worker
    ```
 
