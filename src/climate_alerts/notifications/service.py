@@ -1,12 +1,25 @@
 from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import Row, select
+from sqlalchemy import Row, case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from climate_alerts.agrobot.models import Field
 from climate_alerts.alerts.models import Alert
+from climate_alerts.errors import DeliveryFailure
 from climate_alerts.notifications.models import Notification, NotificationStatus
+
+# Rows written before `DeliveryFailure` existed can hold internal text, such as
+# an exception's class name. Anything that is not one of its messages is
+# returned as the generic one, so stored text never reaches a client.
+_client_safe_last_error = case(
+    (Notification.last_error.is_(None), None),
+    (
+        Notification.last_error.in_([failure.message for failure in DeliveryFailure]),
+        Notification.last_error,
+    ),
+    else_=DeliveryFailure.FAILED.message,
+).label("last_error")
 
 
 async def list_notifications(
@@ -33,7 +46,7 @@ async def list_notifications(
             Notification.threshold,
             Notification.status,
             Notification.attempts,
-            Notification.last_error,
+            _client_safe_last_error,
             Notification.created_at,
             Notification.sent_at,
         )

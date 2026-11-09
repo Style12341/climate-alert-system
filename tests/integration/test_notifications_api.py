@@ -216,7 +216,7 @@ async def test_limit_above_maximum_returns_422(
             {
                 "type": "limit_too_large",
                 "loc": ["query", "limit"],
-                "msg": "limit must be at most 200",
+                "msg": "Limit must be at most 200",
             }
         ]
     }
@@ -240,7 +240,7 @@ async def test_page_size_comes_from_settings(
 
     assert len(default_page.json()["items"]) == 2
     assert over_maximum.status_code == 422
-    assert over_maximum.json()["detail"][0]["msg"] == "limit must be at most 3"
+    assert over_maximum.json()["detail"][0]["msg"] == "Limit must be at most 3"
 
 
 async def test_oversized_cursor_returns_422(
@@ -308,3 +308,51 @@ async def test_openapi_lists_the_delivery_failure_reasons(client: AsyncClient) -
 
     description = schemas["NotificationOut"]["properties"]["last_error"]["description"]
     assert all(failure.message in description for failure in DeliveryFailure)
+
+
+@pytest.mark.parametrize(
+    "legacy_text",
+    [
+        "send failed: RuntimeError",
+        "no sender registered for channel sms",
+    ],
+)
+async def test_stored_text_that_is_not_a_delivery_failure_is_hidden(
+    client: AsyncClient,
+    sessions: SessionFactory,
+    auth_headers: AuthHeaders,
+    legacy_text: str,
+) -> None:
+    """Rows written before the client-safe reasons existed may hold old text."""
+    user, _, alert = await owner_with_alert(sessions)
+    async with sessions() as session:
+        await create_notification(
+            session, alert, status="failed", attempts=1, last_error=legacy_text
+        )
+
+    response = await client.get(URL, headers=auth_headers(user.id))
+
+    assert response.status_code == 200
+    [item] = response.json()["items"]
+    assert item["last_error"] == DeliveryFailure.FAILED.message
+    assert "RuntimeError" not in response.text
+    assert legacy_text not in response.text
+
+
+async def test_stored_delivery_failure_message_is_returned_as_is(
+    client: AsyncClient, sessions: SessionFactory, auth_headers: AuthHeaders
+) -> None:
+    user, _, alert = await owner_with_alert(sessions)
+    async with sessions() as session:
+        await create_notification(
+            session,
+            alert,
+            status="failed",
+            attempts=1,
+            last_error=DeliveryFailure.TIMED_OUT.message,
+        )
+
+    response = await client.get(URL, headers=auth_headers(user.id))
+
+    [item] = response.json()["items"]
+    assert item["last_error"] == DeliveryFailure.TIMED_OUT.message

@@ -42,7 +42,7 @@ async def list_notifications(
         raise invalid_request(
             ("query", "limit"),
             "limit_too_large",
-            f"limit must be at most {settings.max_page_size}",
+            f"Limit must be at most {settings.max_page_size}",
         )
 
     rows, next_cursor = await service.list_notifications(
