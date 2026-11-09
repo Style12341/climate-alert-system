@@ -223,15 +223,20 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "// Before any assertion, so one failed check does not cascade into later requests.",
+                  "var captured;",
+                  "try { captured = pm.response.json(); } catch (error) { captured = {}; }",
+                  "if (captured && captured.id) {",
+                  "    pm.environment.set('alert_id', String(captured.id));",
+                  "}",
                   "pm.test(\"Status is 201\", function () {",
                   "    pm.response.to.have.status(201);",
                   "});",
-                  "pm.test(\"Alert is returned and captured\", function () {",
+                  "pm.test(\"Alert is returned\", function () {",
                   "    var body = pm.response.json();",
                   "    pm.expect(body.event_type).to.eql('hail');",
                   "    pm.expect(body.threshold).to.eql('70.50');",
                   "    pm.expect(String(body.field_id)).to.eql(String(pm.environment.get('field_id')));",
-                  "    pm.environment.set('alert_id', String(body.id));",
                   "});"
                 ]
               }
@@ -842,6 +847,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "// Before any assertion, so one failed check does not cascade into later requests.",
+                  "var captured;",
+                  "try { captured = pm.response.json(); } catch (error) { captured = {}; }",
+                  "if (captured && captured.next_cursor) {",
+                  "    pm.environment.set('next_cursor', String(captured.next_cursor));",
+                  "}",
                   "pm.test(\"Status is 200\", function () {",
                   "    pm.response.to.have.status(200);",
                   "});",
@@ -849,7 +860,6 @@
                   "    var body = pm.response.json();",
                   "    pm.expect(body.items.length).to.eql(1);",
                   "    pm.expect(body.next_cursor).to.eql(body.items[0].id);",
-                  "    pm.environment.set('next_cursor', String(body.next_cursor));",
                   "});"
                 ]
               }
