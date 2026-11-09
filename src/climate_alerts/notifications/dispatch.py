@@ -261,7 +261,6 @@ async def dispatch_due(
     senders: Mapping[str, NotificationSender],
     settings: Settings,
     stopping: asyncio.Event,
-    rng: random.Random | None = None,
 ) -> DispatchResult:
     """Claim, send and record batches until nothing is due or `stopping` is set.
 
@@ -269,7 +268,7 @@ async def dispatch_due(
     finished and recorded. No transaction is open while sending.
     """
     started = time.perf_counter()
-    jitter = rng if rng is not None else random.Random()  # noqa: S311 - not security
+    jitter = random.Random()  # noqa: S311 - not security
     semaphore = asyncio.Semaphore(settings.dispatch_concurrency)
     claimed_count = sent = retried = failed = 0
 
