@@ -48,8 +48,7 @@ src/climate_alerts/
   api/
     app.py               create_app, lifespan, routers
     dependencies.py      Session, current user, shared request types
-    errors.py            Error to HTTP mapping, exception handlers, documented error responses
-    schemas.py           ErrorOut
+    errors.py            Error to HTTP mapping, exception handlers, documented error responses, ErrorOut
     health.py            Liveness and readiness
   agrobot/               Mock of the pre-existing system
     models.py            User, Field, ClimateEventType, WeatherForecast

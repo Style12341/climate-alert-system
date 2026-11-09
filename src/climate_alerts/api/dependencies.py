@@ -2,7 +2,6 @@ from collections.abc import AsyncIterator
 from typing import Annotated, cast
 
 from fastapi import Depends, Path, Query, Request
-from fastapi.exceptions import RequestValidationError
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,10 +40,3 @@ async def get_current_user_id(
 
 
 CurrentUserId = Annotated[int, Depends(get_current_user_id)]
-
-
-def invalid_request(
-    loc: tuple[str, ...], error_type: str, message: str
-) -> RequestValidationError:
-    """A 422 for an input rule only known at runtime, in FastAPI's own shape."""
-    return RequestValidationError([{"type": error_type, "loc": loc, "msg": message}])

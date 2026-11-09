@@ -16,14 +16,19 @@ import structlog
 from fastapi import FastAPI, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from starlette.exceptions import HTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from climate_alerts import errors
-from climate_alerts.api.schemas import ErrorOut
 from climate_alerts.errors import DomainError
 
 logger = structlog.get_logger()
+
+
+class ErrorOut(BaseModel):
+    detail: str
+    code: str
 
 
 @dataclass(frozen=True)

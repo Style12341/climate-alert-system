@@ -3,6 +3,7 @@ import signal
 import typing
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
+from functools import partial
 
 import structlog
 from apscheduler.schedulers.asyncio import (  # type: ignore[import-untyped]
@@ -24,8 +25,6 @@ from climate_alerts.notifications.senders import (
 _CANCELLATION_GRACE_SECONDS = 0.5
 
 logger = structlog.get_logger()
-
-Job = Callable[[], Awaitable[object]]
 
 
 class Worker:
@@ -56,13 +55,19 @@ class Worker:
         self._add_job(
             scheduler,
             "evaluation",
-            self._evaluate,
+            partial(evaluate_alerts, self._sessions, self._settings, self._stopping),
             self._settings.evaluation_interval_seconds,
         )
         self._add_job(
             scheduler,
             "dispatch",
-            self._dispatch,
+            partial(
+                dispatch_due,
+                self._sessions,
+                self._senders,
+                self._settings,
+                self._stopping,
+            ),
             self._settings.dispatch_interval_seconds,
         )
         scheduler.start()
@@ -87,7 +92,7 @@ class Worker:
         self,
         scheduler: AsyncIOScheduler,
         name: str,
-        job: Job,
+        job: Callable[[], Awaitable[object]],
         interval_seconds: float,
     ) -> None:
         scheduler.add_job(
@@ -104,15 +109,9 @@ class Worker:
             misfire_grace_time=None,
         )
 
-    async def _evaluate(self) -> object:
-        return await evaluate_alerts(self._sessions, self._settings, self._stopping)
-
-    async def _dispatch(self) -> object:
-        return await dispatch_due(
-            self._sessions, self._senders, self._settings, self._stopping
-        )
-
-    async def _run_contained(self, name: str, job: Job) -> None:
+    async def _run_contained(
+        self, name: str, job: Callable[[], Awaitable[object]]
+    ) -> None:
         """Run one job, keeping any failure from reaching the scheduler.
 
         Catches `Exception` only: cancellation has to reach the job. The next

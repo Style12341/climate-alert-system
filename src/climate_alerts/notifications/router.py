@@ -1,6 +1,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Query
+from fastapi.exceptions import RequestValidationError
 
 from climate_alerts.api.dependencies import (
     NO_NUL_PATTERN,
@@ -8,7 +9,6 @@ from climate_alerts.api.dependencies import (
     OptionalIdQuery,
     SessionDep,
     SettingsDep,
-    invalid_request,
 )
 from climate_alerts.api.errors import error_responses
 from climate_alerts.errors import InvalidCredentials
@@ -39,10 +39,14 @@ async def list_notifications(
 ) -> NotificationPage:
     page_size = settings.default_page_size if limit is None else limit
     if page_size > settings.max_page_size:
-        raise invalid_request(
-            ("query", "limit"),
-            "limit_too_large",
-            f"Limit must be at most {settings.max_page_size}",
+        raise RequestValidationError(
+            [
+                {
+                    "type": "limit_too_large",
+                    "loc": ("query", "limit"),
+                    "msg": f"Limit must be at most {settings.max_page_size}",
+                }
+            ]
         )
 
     rows, next_cursor = await service.list_notifications(
