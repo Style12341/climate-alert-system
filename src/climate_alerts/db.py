@@ -34,6 +34,10 @@ def build_engine(settings: Settings) -> AsyncEngine:
         # Without it, a query on a vanished host never returns, and with
         # max_instances=1 the scheduler then skips every later run.
         connect_args={"command_timeout": settings.db_command_timeout_seconds},
+        # Bound values such as phone numbers and emails would otherwise be
+        # formatted into every StatementError's text, and so into tracebacks,
+        # and into the INFO log of each statement.
+        hide_parameters=True,
     )
 
 

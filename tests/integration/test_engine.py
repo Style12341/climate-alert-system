@@ -3,11 +3,13 @@ from collections.abc import AsyncIterator
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from climate_alerts.config import Settings
-from climate_alerts.db import build_engine
+from climate_alerts.db import SessionFactory, build_engine
+from tests.integration.factories import create_user
 
 
 @pytest.fixture
@@ -50,3 +52,18 @@ async def test_query_on_a_stalled_connection_gives_up(settings: Settings) -> Non
                 await connection.execute(text("SELECT pg_sleep(30)"))
     finally:
         await engine.dispose()
+
+
+async def test_database_errors_do_not_carry_parameters(
+    sessions: SessionFactory,
+) -> None:
+    phone = "+5491187654321"
+    async with sessions() as session:
+        await create_user(session, phone=phone)
+
+    async with sessions() as session:
+        with pytest.raises(IntegrityError) as caught:
+            await create_user(session, phone=phone)
+
+    # Tracebacks and logs render the exception through str().
+    assert phone not in str(caught.value)
