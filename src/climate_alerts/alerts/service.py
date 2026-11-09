@@ -6,22 +6,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from climate_alerts.agrobot.models import ClimateEventType, Field
 from climate_alerts.alerts.models import Alert
-
-
-class FieldNotFound(Exception):
-    pass
-
-
-class AlertNotFound(Exception):
-    pass
-
-
-class UnknownEventType(Exception):
-    pass
-
-
-class AlertAlreadyExists(Exception):
-    pass
+from climate_alerts.errors import (
+    AlertAlreadyExists,
+    AlertNotFound,
+    FieldNotFound,
+    UnknownEventType,
+)
 
 
 def _live_alert_owned_by(user_id: int) -> ColumnElement[bool]:

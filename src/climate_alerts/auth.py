@@ -3,6 +3,7 @@ import re
 import jwt
 
 from climate_alerts.config import Settings
+from climate_alerts.errors import InvalidCredentials
 
 # Largest value of a PostgreSQL BIGINT, the type of every primary key.
 MAX_BIGINT = 2**63 - 1
@@ -10,10 +11,6 @@ MAX_BIGINT = 2**63 - 1
 # int() also accepts spaces, underscores and non-ASCII digits, so it cannot
 # decide what a user id looks like.
 _USER_ID = re.compile(r"[1-9][0-9]*")
-
-
-class InvalidCredentials(Exception):
-    """The bearer token cannot be trusted or does not name a valid user id."""
 
 
 def verify_token(token: str, settings: Settings) -> int:

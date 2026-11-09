@@ -14,6 +14,13 @@ from tests.integration.factories import create_alert, create_field, create_user
 
 AuthHeaders = Callable[[int], dict[str, str]]
 
+FIELD_NOT_FOUND = {"detail": "Field not found", "code": "field_not_found"}
+ALERT_NOT_FOUND = {"detail": "Alert not found", "code": "alert_not_found"}
+ALREADY_EXISTS = {
+    "detail": "An active alert already exists for this field and event type",
+    "code": "alert_already_exists",
+}
+
 
 async def owner_with_field(sessions: SessionFactory) -> tuple[User, Field]:
     async with sessions() as session:
@@ -89,7 +96,7 @@ async def test_unknown_event_returns_422(
     assert response.json() == {
         "detail": [
             {
-                "type": "value_error",
+                "type": "unknown_event_type",
                 "loc": ["body", "event_type"],
                 "msg": "Unknown event type",
             }
@@ -123,6 +130,7 @@ async def test_duplicate_returns_409(
 
     assert first.status_code == 201
     assert second.status_code == 409
+    assert second.json() == ALREADY_EXISTS
 
 
 async def test_concurrent_creates_conflict_once(
@@ -138,6 +146,8 @@ async def test_concurrent_creates_conflict_once(
     )
 
     assert sorted(r.status_code for r in responses) == [201, 409]
+    [conflict] = [r for r in responses if r.status_code == 409]
+    assert conflict.json() == ALREADY_EXISTS
 
 
 async def test_create_on_foreign_field_returns_404(
@@ -153,6 +163,7 @@ async def test_create_on_foreign_field_returns_404(
     )
 
     assert response.status_code == 404
+    assert response.json() == FIELD_NOT_FOUND
 
 
 async def test_list_scoped_and_filtered(
@@ -235,6 +246,7 @@ async def test_soft_deleted_alert_returns_404(
     response = await client.request(method, url, json=payload, headers=headers)
 
     assert response.status_code == 404
+    assert response.json() == ALERT_NOT_FOUND
 
 
 async def test_read_foreign_alert_returns_404(
@@ -250,6 +262,7 @@ async def test_read_foreign_alert_returns_404(
     )
 
     assert response.status_code == 404
+    assert response.json() == ALERT_NOT_FOUND
 
 
 async def test_patch_changes_threshold_only(
@@ -299,6 +312,7 @@ async def test_patch_foreign_alert_returns_404(
     )
 
     assert response.status_code == 404
+    assert response.json() == ALERT_NOT_FOUND
     async with sessions() as session:
         stored = await session.get_one(Alert, alert.id)
     assert stored.threshold == Decimal("70")
@@ -318,6 +332,7 @@ async def test_delete_is_soft_and_not_repeatable(
 
     assert first.status_code == 204
     assert second.status_code == 404
+    assert second.json() == ALERT_NOT_FOUND
     async with sessions() as session:
         deleted_at = await session.scalar(
             select(Alert.deleted_at).where(Alert.id == alert.id)
@@ -338,6 +353,7 @@ async def test_delete_foreign_alert_returns_404(
     )
 
     assert response.status_code == 404
+    assert response.json() == ALERT_NOT_FOUND
     async with sessions() as session:
         stored = await session.get_one(Alert, alert.id)
     assert stored.deleted_at is None

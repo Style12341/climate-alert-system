@@ -5,8 +5,9 @@ import jwt
 import pytest
 
 from climate_alerts.agrobot.tokens import issue_token
-from climate_alerts.auth import MAX_BIGINT, InvalidCredentials, verify_token
+from climate_alerts.auth import MAX_BIGINT, verify_token
 from climate_alerts.config import Settings
+from climate_alerts.errors import InvalidCredentials
 
 # 64 characters: PyJWT warns on HMAC keys shorter than the hash, and the
 # suite turns warnings into errors, so the HS512 case needs a key this long.

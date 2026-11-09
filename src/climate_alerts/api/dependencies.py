@@ -1,12 +1,12 @@
 from collections.abc import AsyncIterator
 from typing import Annotated, cast
 
-from fastapi import Depends, HTTPException, Path, Query, Request, status
+from fastapi import Depends, Path, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from climate_alerts.auth import MAX_BIGINT, InvalidCredentials, verify_token
+from climate_alerts.auth import MAX_BIGINT, verify_token
 from climate_alerts.config import Settings
 from climate_alerts.db import SessionFactory
 
@@ -37,19 +37,14 @@ async def get_current_user_id(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer)],
     settings: SettingsDep,
 ) -> int:
-    try:
-        return verify_token(credentials.credentials, settings)
-    except InvalidCredentials as exc:
-        raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token",
-            headers={"WWW-Authenticate": "Bearer"},
-        ) from exc
+    return verify_token(credentials.credentials, settings)
 
 
 CurrentUserId = Annotated[int, Depends(get_current_user_id)]
 
 
-def invalid_request(loc: tuple[str, ...], message: str) -> RequestValidationError:
-    """A 422 for a rule only known at runtime, in the shape of FastAPI's own."""
-    return RequestValidationError([{"type": "value_error", "loc": loc, "msg": message}])
+def invalid_request(
+    loc: tuple[str, ...], error_type: str, message: str
+) -> RequestValidationError:
+    """A 422 for an input rule only known at runtime, in FastAPI's own shape."""
+    return RequestValidationError([{"type": error_type, "loc": loc, "msg": message}])

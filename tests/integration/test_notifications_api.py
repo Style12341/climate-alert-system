@@ -60,6 +60,7 @@ async def test_requires_a_token(client: AsyncClient) -> None:
     response = await client.get(URL)
 
     assert response.status_code == 401
+    assert response.json()["code"] == "unauthorized"
 
 
 async def test_body_has_spec_fields(
@@ -212,7 +213,7 @@ async def test_limit_above_maximum_returns_422(
     assert response.json() == {
         "detail": [
             {
-                "type": "value_error",
+                "type": "limit_too_large",
                 "loc": ["query", "limit"],
                 "msg": "limit must be at most 200",
             }
@@ -238,6 +239,7 @@ async def test_page_size_comes_from_settings(
 
     assert len(default_page.json()["items"]) == 2
     assert over_maximum.status_code == 422
+    assert over_maximum.json()["detail"][0]["msg"] == "limit must be at most 3"
 
 
 async def test_oversized_cursor_returns_422(
