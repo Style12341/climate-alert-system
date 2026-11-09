@@ -76,4 +76,4 @@ La decisión de asociar los pronósticos a `field_id` se mantuvo, pero cambió s
 - [x] Escribir el plan de implementación.
 - [x] Implementar con tests sobre PostgreSQL real.
 - [x] Volver a medir con las sentencias finales y auditar las licencias de todas las dependencias.
-- [x] Documentar lo que faltó, en el [README](README.md#lo-que-faltó).
+- [x] Documentar lo que faltó, en el [README](../README.md#lo-que-faltó).

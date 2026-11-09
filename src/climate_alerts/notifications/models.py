@@ -55,7 +55,7 @@ class Notification(Base):
     channel: Mapped[str] = mapped_column(Text)
     probability: Mapped[Decimal] = mapped_column(Numeric(5, 2))
     threshold: Mapped[Decimal] = mapped_column(Numeric(5, 2))
-    # Plain text: the CHECK owns the valid values. See ModeloDeDatos.md.
+    # Plain text: the CHECK owns the valid values. See docs/ModeloDeDatos.md.
     status: Mapped[str] = mapped_column(
         Text, server_default=NotificationStatus.PENDING.value
     )

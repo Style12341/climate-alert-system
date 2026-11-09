@@ -1,4 +1,4 @@
-"""Initial schema: six tables, every rule from ModeloDeDatos.md, event catalog.
+"""Initial schema: six tables, every rule from docs/ModeloDeDatos.md, event catalog.
 
 Written by hand because autogenerate sees neither CHECK constraints nor changes
 to the WHERE of a partial index.

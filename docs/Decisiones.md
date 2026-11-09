@@ -113,7 +113,7 @@ El detalle de cada tabla y sus diagramas están en [ModeloDeDatos.md](ModeloDeDa
 
 - APScheduler solo planifica: cada réplica dispara por su cuenta. Es seguro porque las garantías están en PostgreSQL (decisión 7).
 - No se usa un job store persistente, porque la documentación indica que no se puede compartir entre procesos. Los jobs se definen en código.
-- Al apagarse, su ejecutor asyncio cancela los jobs en curso y no puede esperarlos, aun con `wait=True`. El worker los deja terminar por su cuenta antes de apagar el planificador ([especificación](docs/SPEC.md#10-worker-lifecycle)).
+- Al apagarse, su ejecutor asyncio cancela los jobs en curso y no puede esperarlos, aun con `wait=True`. El worker los deja terminar por su cuenta antes de apagar el planificador ([especificación](SPEC.md#10-worker-lifecycle)).
 - Las descargas incluyen instalaciones de CI y transitivas. No se encontraron casos empresariales citables para ninguna opción, así que descargas y contribuidores son indicadores aproximados.
 
 **Revisión funcional de las demás opciones**, según su documentación:
@@ -360,7 +360,7 @@ La alternativa con una sola réplica es registrar los envíos exitosos con un ú
 | `DISPATCH_BATCH_SIZE` | 500 notificaciones | Benchmark (decisión 12) |
 | `NOTIFICATION_CHANNELS` | `whatsapp` | Decisión 21. Un solo canal mantiene válidos los volúmenes medidos |
 
-Los intervalos, reintentos y plazos de reserva están en la [especificación](docs/SPEC.md#4-configuration).
+Los intervalos, reintentos y plazos de reserva están en la [especificación](SPEC.md#4-configuration).
 
 **Excepción:** los secretos, como `JWT_SECRET`, no tienen valor por defecto. Si faltan, la aplicación no arranca, para que nunca se despliegue con un secreto conocido.
 
@@ -374,7 +374,7 @@ Los intervalos, reintentos y plazos de reserva están en la [especificación](do
 
 **Reintentos:** backoff exponencial con jitter, en una sola capa. Los errores permanentes pasan directo a `failed`. Los intentos se cuentan al reservar, así que una fila que hace caer al worker termina por detenerse.
 
-**Límite real del lote:** `UPDATE ... WHERE id IN (SELECT ... LIMIT n FOR UPDATE SKIP LOCKED)` puede reservar más de `n` filas con ciertos planes, porque PostgreSQL puede volver a ejecutar la subconsulta. Se compararon seis formas (A, B, C, D, E y G), y además la forma E con un plan genérico, en PostgreSQL 17 con [`scripts/claim_forms.sql`](scripts/claim_forms.sql), que se ejecuta sobre un contenedor descartable. La tabla resume cuatro de ellas:
+**Límite real del lote:** `UPDATE ... WHERE id IN (SELECT ... LIMIT n FOR UPDATE SKIP LOCKED)` puede reservar más de `n` filas con ciertos planes, porque PostgreSQL puede volver a ejecutar la subconsulta. Se compararon seis formas (A, B, C, D, E y G), y además la forma E con un plan genérico, en PostgreSQL 17 con [`scripts/claim_forms.sql`](../scripts/claim_forms.sql), que se ejecuta sobre un contenedor descartable. La tabla resume cuatro de ellas:
 
 | Forma | Estadísticas desactualizadas, lote de 5, 21 filas pendientes | 100.000 filas pendientes, estadísticas al día, lote de 500 |
 |-------|-------------------------------------------------------------|------------------------------------------------------------|
@@ -595,7 +595,7 @@ Los errores de validación conservan la lista de FastAPI, `{"detail": [{"type", 
 | Modelo de datos sólido | [ModeloDeDatos.md](ModeloDeDatos.md) | Hecho |
 | FastAPI, SQLAlchemy, PostgreSQL y Alembic | Se usan. APScheduler se justifica en la decisión 3 | Hecho |
 | Repositorio, README, migraciones y tests | Este repositorio, con migraciones Alembic y tests sobre PostgreSQL real | Hecho |
-| Documentar lo que falte | [Sección del README](README.md#lo-que-faltó) | Hecho |
+| Documentar lo que falte | [Sección del README](../README.md#lo-que-faltó) | Hecho |
 
 **Interpretaciones propias, porque el enunciado no las define:**
 

@@ -4,7 +4,7 @@
 
 Producers configure alerts on their fields, choosing a climate event and a probability threshold. A background job compares stored forecasts against those thresholds, and the system notifies the owner when one is reached. The system must be small, production grade, and honest about what it leaves out.
 
-Rationale, rejected alternatives and sources live in [`Decisiones.md`](../Decisiones.md). The schema and its diagrams live in [`ModeloDeDatos.md`](../ModeloDeDatos.md).
+Rationale, rejected alternatives and sources live in [`Decisiones.md`](Decisiones.md). The schema and its diagrams live in [`ModeloDeDatos.md`](ModeloDeDatos.md).
 
 ## 1. Context
 

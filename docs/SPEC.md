@@ -2,7 +2,7 @@
 
 **Status:** final · **Date:** 2026-11-08 · **Implements:** [`PRD.md`](PRD.md)
 
-This document says how the system is built. The schema and its diagrams are in [`ModeloDeDatos.md`](../ModeloDeDatos.md). The reasoning behind each choice is in [`Decisiones.md`](../Decisiones.md). Neither is repeated here.
+This document says how the system is built. The schema and its diagrams are in [`ModeloDeDatos.md`](ModeloDeDatos.md). The reasoning behind each choice is in [`Decisiones.md`](Decisiones.md). Neither is repeated here.
 
 ## 1. Runtime
 

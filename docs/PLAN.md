@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.14, FastAPI, SQLAlchemy 2.1 (async, asyncpg), Alembic, APScheduler 3.x, PyJWT, pydantic-settings, structlog, pytest with testcontainers.
 
-**Spec:** [`SPEC.md`](SPEC.md), which implements [`PRD.md`](PRD.md). Schema and queries: [`ModeloDeDatos.md`](../ModeloDeDatos.md). Rationale: [`Decisiones.md`](../Decisiones.md). Executors read all of them.
+**Spec:** [`SPEC.md`](SPEC.md), which implements [`PRD.md`](PRD.md). Schema and queries: [`ModeloDeDatos.md`](ModeloDeDatos.md). Rationale: [`Decisiones.md`](Decisiones.md). Executors read all of them.
 
 ## Global Constraints
 
