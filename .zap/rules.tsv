@@ -1,0 +1,5 @@
+# ZAP rules for the API scan in CI (.github/workflows/ci.yml, job dast).
+# Format: rule id<TAB>IGNORE|WARN|FAIL<TAB>(name)<TAB>justification.
+# Any alert not set to IGNORE here fails the build.
+10021	IGNORE	(X-Content-Type-Options Header Missing)	The API serves only JSON, which browsers do not MIME-sniff into script or HTML.
+90004	IGNORE	(Cross-Origin-Resource-Policy Header Missing or Invalid)	A bearer-token JSON API is not embedded as a cross-origin resource, so CORP adds nothing.
