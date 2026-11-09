@@ -129,3 +129,19 @@ El catálogo completo de códigos está en la [sección 7 de `SPEC.md`](SPEC.md#
 | `scripts/smoke_test.sh` | Levanta el stack con Compose, espera la primera evaluación y el primer envío, y corre la colección con Newman. Deja el stack levantado. No es una prueba de carga ni reinicia la base: si hubo cambios manuales, ejecutar antes `docker compose down -v` |
 
 Los resultados están en las decisiones [3](Decisiones.md#3-job-periódico-apscheduler-3x), [12](Decisiones.md#12-volumen-y-batching) y [14](Decisiones.md#14-estado-de-entrega-next_attempt_at-como-plazo-de-reserva).
+
+## Integración continua
+
+`.github/workflows/ci.yml` corre en cada push y pull request a `main`. Los trabajos son independientes y corren en paralelo:
+
+- `lint`: `ruff check`, `ruff format --check` y `mypy src`. Falla con cualquier error de estilo, de formato o de tipos.
+- `test`: la suite de `pytest` contra PostgreSQL 17 con Testcontainers. Falla si una prueba falla.
+- `dependencies`: `pip-audit` sobre las dependencias de `uv.lock` y `scripts/license_audit.py`. Falla con una vulnerabilidad conocida o con una licencia ausente o copyleft sin revisar.
+- `secrets`: gitleaks sobre todo el historial de git. Falla si encuentra un secreto.
+- `container`: construye la imagen y la analiza con Trivy, junto con el `Dockerfile`. Falla con una vulnerabilidad CRITICAL o HIGH que ya tenga corrección, o con una mala configuración CRITICAL o HIGH.
+- `dast`: levanta el stack con Compose, corre `scripts/smoke_test.sh` y escanea la API con ZAP, autenticado con el token de un usuario de prueba. Falla si falla la colección o si ZAP reporta una alerta de nivel FAIL. El informe de ZAP queda como artefacto de la ejecución.
+- `sast`: CodeQL para Python. Falla si el análisis no termina; los hallazgos aparecen en la pestaña Security de GitHub. En un repositorio privado requiere GitHub Advanced Security.
+
+Dependabot (`.github/dependabot.yml`) propone cada semana actualizaciones de las dependencias de Python, de las acciones y de la imagen base.
+
+La integración continua **no** despliega, no hace pruebas de carga y no ejecuta el sistema de forma sostenida.
