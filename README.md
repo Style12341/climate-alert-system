@@ -75,6 +75,6 @@ Lo que el enunciado pedía está hecho. Esto quedó sin hacer o sin probar:
 - [`docs/Decisiones.md`](docs/Decisiones.md): razonamiento de cada decisión, alternativas descartadas y casos borde.
 - [`docs/ModeloDeDatos.md`](docs/ModeloDeDatos.md): esquema, reglas de la base y diagramas.
 - [`docs/procedimiento.md`](docs/procedimiento.md): cómo se encaró el trabajo y qué cambió en el camino.
-- [`docs/operacion.md`](docs/operacion.md): correrlo sin Docker, tokens, colección, errores, reencolado y scripts.
+- [`docs/operacion.md`](docs/operacion.md): correrlo sin Docker, tokens, colección, errores, reencolado, scripts e integración continua.
 - [`docs/PRD.md`](docs/PRD.md), [`docs/SPEC.md`](docs/SPEC.md) y [`docs/PLAN.md`](docs/PLAN.md): documentos de trabajo, en inglés.
 - [`statement.md`](statement.md): el enunciado.
