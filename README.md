@@ -33,7 +33,7 @@ docker compose down -v
 
 Hacen falta [uv](https://docs.astral.sh/uv/) y un PostgreSQL 17 con una base y un usuario que coincidan con `DATABASE_URL`.
 
-1. Copiar `.env.example` a `.env` y completar `DATABASE_URL` y `JWT_SECRET`, de al menos 32 caracteres. El archivo lista todas las variables con sus valores por defecto.
+1. Copiar `example.env` a `.env` y completar `DATABASE_URL` y `JWT_SECRET`, de al menos 32 caracteres. El archivo lista todas las variables con sus valores por defecto.
 2. Exportar las variables. La API, el worker y el comando de datos simulados leen `.env` del directorio actual, pero las migraciones solo leen el entorno (`migrations/env.py` usa `os.environ["DATABASE_URL"]`):
 
    ```bash

@@ -73,7 +73,7 @@ tests/
 
 `Settings` extends `BaseSettings`. Field names map to case-insensitive environment variables with no prefix.
 
-`.env.example` at the repository root lists every variable with its default.
+`example.env` at the repository root lists every variable with its default.
 
 **Required, no default.** The application refuses to start without them.
 
