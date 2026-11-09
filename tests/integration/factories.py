@@ -1,7 +1,11 @@
-"""Row factories and shared helpers for integration tests.
+"""Shared helpers for integration tests, in two groups.
 
-Each factory commits, so the row is visible to other sessions, as it would be in
+Row factories create users, fields, alerts, forecasts and notifications. Each
+factory commits, so the row is visible to other sessions, as it would be in
 production. Numeric arguments accept anything `Decimal(str(value))` can parse.
+
+Dispatch scaffolding (`LEASE_SECONDS`, `FakeSender`, `registry`, `dispatch`,
+`stored`, `expire_leases`) drives the dispatcher in test_dispatch and test_claim.
 """
 
 import asyncio
@@ -25,6 +29,8 @@ from climate_alerts.notifications.senders import (
     NotificationSender,
     OutboundNotification,
 )
+
+# --- Row factories ---
 
 _phone_numbers = count(1)
 
@@ -109,7 +115,7 @@ def _local_date(field: Field, days_ahead: int) -> date:
     return datetime.now(ZoneInfo(field.timezone)).date() + timedelta(days=days_ahead)
 
 
-# Dispatch helpers shared by test_dispatch and test_claim.
+# --- Dispatch scaffolding, shared by test_dispatch and test_claim ---
 
 LEASE_SECONDS = 300
 
@@ -141,19 +147,21 @@ def registry(*senders: NotificationSender) -> dict[str, NotificationSender]:
 
 
 async def create_owned_alert(session: AsyncSession, email: str | None = None) -> Alert:
+    """Create a user, a field named "La Esperanza" and a default alert on it."""
     user = await create_user(session, email=email)
     field = await create_field(session, user, name="La Esperanza")
     return await create_alert(session, field)
 
 
 async def create_due_notifications(
-    sessions: SessionFactory, count: int, **overrides: Any
+    sessions: SessionFactory, n: int, **overrides: Any
 ) -> list[int]:
+    """Create `n` pending rows, due now because `next_attempt_at` defaults to now()."""
     async with sessions() as session:
         alert = await create_owned_alert(session)
         created = [
             await create_notification(session, alert, days_ahead=day, **overrides)
-            for day in range(count)
+            for day in range(n)
         ]
     return [notification.id for notification in created]
 
@@ -164,6 +172,7 @@ async def stored(sessions: SessionFactory, notification_id: int) -> Notification
 
 
 async def expire_leases(sessions: SessionFactory) -> None:
+    """Make every pending row due, whether it is leased or not."""
     async with sessions.begin() as session:
         await session.execute(
             update(Notification)

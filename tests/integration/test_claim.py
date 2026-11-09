@@ -195,7 +195,13 @@ async def test_stale_dispatcher_cannot_overwrite(sessions: SessionFactory) -> No
     await expire_leases(sessions)
     await claim_batch(sessions, 10, LEASE_SECONDS)
 
-    stale = Outcome(notification_id, 1, "sent", None, None)
+    stale = Outcome(
+        notification_id=notification_id,
+        attempts=1,
+        kind="sent",
+        error=None,
+        delay_seconds=None,
+    )
     await record_outcomes(sessions, [stale])
 
     row = await stored(sessions, notification_id)
@@ -204,7 +210,18 @@ async def test_stale_dispatcher_cannot_overwrite(sessions: SessionFactory) -> No
     assert row.attempts == 2
 
     # The dispatcher that holds the current lease can still record its result.
-    await record_outcomes(sessions, [Outcome(notification_id, 2, "sent", None, None)])
+    await record_outcomes(
+        sessions,
+        [
+            Outcome(
+                notification_id=notification_id,
+                attempts=2,
+                kind="sent",
+                error=None,
+                delay_seconds=None,
+            )
+        ],
+    )
     assert (await stored(sessions, notification_id)).status == "sent"
 
 
@@ -220,12 +237,27 @@ async def test_final_row_is_not_overwritten_with_matching_attempts(
     [notification_id] = await create_due_notifications(sessions, 1)
     await claim_batch(sessions, 10, LEASE_SECONDS)
     await record_outcomes(
-        sessions, [Outcome(notification_id, 1, final_kind, final_error, None)]
+        sessions,
+        [
+            Outcome(
+                notification_id=notification_id,
+                attempts=1,
+                kind=final_kind,
+                error=final_error,
+                delay_seconds=None,
+            )
+        ],
     )
     before = await stored(sessions, notification_id)
 
     # Same `attempts`, so only the status clause of the fence can reject it.
-    late = Outcome(notification_id, 1, "retry", DeliveryFailure.FAILED, 60)
+    late = Outcome(
+        notification_id=notification_id,
+        attempts=1,
+        kind="retry",
+        error=DeliveryFailure.FAILED,
+        delay_seconds=60,
+    )
     await record_outcomes(sessions, [late])
 
     after = await stored(sessions, notification_id)
