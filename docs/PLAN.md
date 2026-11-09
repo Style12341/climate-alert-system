@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.14, FastAPI, SQLAlchemy 2.1 (async, asyncpg), Alembic, APScheduler 3.x, PyJWT, pydantic-settings, structlog, pytest with testcontainers.
 
-**Spec:** [`SPEC.md`](SPEC.md), which implements [`PRD.md`](PRD.md). Schema and queries: [`ModeloDeDatos.md`](ModeloDeDatos.md). Rationale: [`Decisiones.md`](Decisiones.md). Executors read all of them.
+**Spec:** [`SPEC.md`](SPEC.md), which implements [`PRD.md`](PRD.md). Schema and queries: [`ModeloDeDatos.md`](ModeloDeDatos.md). Rationale: [`Decisiones.md`](Decisiones.md).
 
 ## Global Constraints
 
@@ -400,7 +400,7 @@ claimed = (
 )
 ```
 
-Note: an earlier version selected the ids in a `MATERIALIZED` CTE. It kept the batch bounded but scanned the whole table on every claim; `ARRAY(...)` is evaluated once as an InitPlan and the update uses the primary key. See `Decisiones.md`, decision 14.
+Note: an earlier version selected the ids in a `MATERIALIZED` CTE. It kept the batch bounded but scanned the whole table on every claim; `ARRAY(...)` is evaluated once as an InitPlan and the update uses the primary key. See `Decisiones.md`, decision 6.
 
 Send with `asyncio.timeout` under a semaphore, outside any transaction. Each outcome update filters on `id`, `attempts` and `status == "pending"`. Log `dispatch.completed`.
 
@@ -621,7 +621,7 @@ Expected: every package has a license, and any copyleft entry is explained in `D
 - [ ] **Step 2: Promote the benchmark and measure the final statements**
 
 `scripts/volume_benchmark.py` must use `build_evaluation_statement` and `build_claim_statement`, and refuse to run unless the database URL host is `localhost` or `127.0.0.1`, because it truncates tables. Run it at 24,000 farms, in the analyzed-while-empty state.
-Expected: worst-case evaluation stays near the 10 s measured earlier. Record the numbers in decision 12 of `Decisiones.md`.
+Expected: worst-case evaluation stays near the 10 s measured earlier. Record the numbers in decision 10 of `Decisiones.md`.
 
 - [ ] **Step 3: Check the diagrams**
 
