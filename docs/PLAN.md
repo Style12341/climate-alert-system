@@ -372,31 +372,36 @@ Expected: FAIL with `ModuleNotFoundError: climate_alerts.notifications.senders`
 
 - [ ] **Step 3: Implement as specified in SPEC section 9**
 
-The claim has been executed on PostgreSQL in this form:
+The claim is one statement, executed on PostgreSQL in this form:
 
 ```python
-due = (
-    select(Notification.id)
-    .where(Notification.status == "pending", Notification.next_attempt_at <= func.now())
-    .order_by(Notification.next_attempt_at, Notification.id)
+due = aliased(Notification)  # without the alias the subquery loses its FROM
+due_ids = (
+    select(due.id)
+    .where(due.status == "pending", due.next_attempt_at <= func.now())
+    .order_by(due.next_attempt_at, due.id)
     .limit(batch_size)
     .with_for_update(skip_locked=True)
 )
 claimed = (
     update(Notification)
-    .where(Notification.id.in_(due))
+    .where(
+        Notification.id == any_(func.array(due_ids.scalar_subquery())),
+        Alert.id == Notification.alert_id,
+        Field.id == Alert.field_id,
+        User.id == Field.owner_id,
+    )
     .values(
         attempts=Notification.attempts + 1,
         next_attempt_at=func.now() + timedelta(seconds=lease_seconds),
     )
-    .returning(...)
-    .cte("claimed")
+    .returning(
+        ..., Alert.event_type, Field.name.label("field_name"), User.phone, User.email
+    )
 )
-# select(claimed, Alert.event_type, Field.name.label("field_name"), User.phone, User.email)
-#   joined through alerts, fields and users
 ```
 
-Note: the implemented claim selects the ids in a `MATERIALIZED` CTE; see `ModeloDeDatos.md`.
+Note: an earlier version selected the ids in a `MATERIALIZED` CTE. It kept the batch bounded but scanned the whole table on every claim; `ARRAY(...)` is evaluated once as an InitPlan and the update uses the primary key. See `Decisiones.md`, decision 14.
 
 Send with `asyncio.timeout` under a semaphore, outside any transaction. Each outcome update filters on `id`, `attempts` and `status == "pending"`. Log `dispatch.completed`.
 

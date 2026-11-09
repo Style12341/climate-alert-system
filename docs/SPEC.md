@@ -117,7 +117,7 @@ Application queries use SQLAlchemy's 2.0-style expression language: `select()`, 
 
 Not allowed in application code: `text()`, `session.query()`, `declarative_base()`, `select([...])` and any other legacy or deprecated API. Ruff bans the legacy imports through `TID251`, a unit test rejects `.query(` calls, and pytest turns deprecation warnings into errors. Migrations and tests may use `text()`.
 
-PostgreSQL features come from the same language: `postgresql.insert(...).from_select(...).on_conflict_do_nothing(constraint=...)`, `with_for_update(skip_locked=True)`, `update(...).returning(...).cte(...)`, and `func.unnest(...).table_valued("channel").render_derived(name="c")`.
+PostgreSQL features come from the same language: `postgresql.insert(...).from_select(...).on_conflict_do_nothing(constraint=...)`, `with_for_update(skip_locked=True)`, `any_(func.array(...))`, an `update(...).returning(...)` whose `where` references other tables (rendered as `UPDATE ... FROM`), and `func.unnest(...).table_valued("channel").render_derived(name="c")`.
 
 `ModeloDeDatos.md` shows these statements as SQL because they are easier to read that way.
 

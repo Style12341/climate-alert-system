@@ -254,27 +254,27 @@ ON CONFLICT (alert_id, forecast_date, channel) DO NOTHING;
 ### Reserva de un lote para enviar
 
 ```sql
-WITH due AS MATERIALIZED (
-  SELECT id
-  FROM notifications
-  WHERE status = 'pending' AND next_attempt_at <= now()
-  ORDER BY next_attempt_at, id
-  LIMIT :batch_size
-  FOR UPDATE SKIP LOCKED
-),
-claimed AS (
-  UPDATE notifications
-  SET attempts = attempts + 1,
-      next_attempt_at = now() + :lease_interval
-  WHERE id IN (SELECT id FROM due)
-  RETURNING id, alert_id, forecast_date, channel, probability, threshold, attempts
-)
-SELECT c.*, a.event_type, f.name AS field_name, u.phone, u.email
-FROM claimed c
-JOIN alerts a ON a.id = c.alert_id
-JOIN fields f ON f.id = a.field_id
-JOIN users u ON u.id = f.owner_id;
+UPDATE notifications
+SET attempts = notifications.attempts + 1,
+    next_attempt_at = now() + :lease_interval
+FROM alerts a, fields f, users u
+WHERE notifications.id = ANY (ARRAY(
+        SELECT id
+        FROM notifications
+        WHERE status = 'pending' AND next_attempt_at <= now()
+        ORDER BY next_attempt_at, id
+        LIMIT :batch_size
+        FOR UPDATE SKIP LOCKED
+      ))
+  AND a.id = notifications.alert_id
+  AND f.id = a.field_id
+  AND u.id = f.owner_id
+RETURNING notifications.id, notifications.forecast_date, notifications.channel,
+          notifications.probability, notifications.threshold, notifications.attempts,
+          a.event_type, f.name AS field_name, u.phone, u.email;
 ```
+
+Los ids se eligen dentro de `ARRAY(...)` porque PostgreSQL lo evalúa una sola vez, como un InitPlan, y después actualiza por clave primaria. Con un `IN (subconsulta)` simple, la subconsulta se puede volver a evaluar y reservar más filas que las que indica `LIMIT`.
 
 ## Qué se comprobó
 

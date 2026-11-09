@@ -7,7 +7,9 @@ from datetime import timedelta
 from typing import Any, Literal
 
 import structlog
-from sqlalchemy import Select, func, select, update
+from sqlalchemy import any_, func, select, update
+from sqlalchemy.orm import aliased
+from sqlalchemy.sql.dml import ReturningUpdate
 
 from climate_alerts.agrobot.models import Field, User
 from climate_alerts.alerts.models import Alert
@@ -58,7 +60,9 @@ def backoff_seconds(
     return float(min(cap, base * 2 ** (attempts - 1))) * rng.uniform(0.5, 1.0)
 
 
-def build_claim_statement(batch_size: int, lease_seconds: float) -> Select[Any]:
+def build_claim_statement(
+    batch_size: int, lease_seconds: float
+) -> ReturningUpdate[*tuple[Any, ...]]:
     """Take a lease on the oldest due rows and return what sending them needs.
 
     Moving `next_attempt_at` forward is the lease: the row stops being due, so
@@ -66,52 +70,54 @@ def build_claim_statement(batch_size: int, lease_seconds: float) -> Select[Any]:
     row becomes due again when the lease expires. SKIP LOCKED makes concurrent
     dispatchers take different rows instead of waiting on each other.
 
-    The ids are picked in a MATERIALIZED CTE because that evaluates once. Inside
-    `WHERE id IN (...)` PostgreSQL may re-run the subquery per outer row when
-    statistics are stale, and each re-run skips the rows this command already
-    updated, so LIMIT stops bounding the batch.
+    The ids are picked inside `ARRAY(...)`, which PostgreSQL evaluates once as
+    an InitPlan, then updated through the primary key. Inside `WHERE id IN
+    (...)` the planner may re-run the subquery per outer row when statistics
+    are stale, and each re-run skips the rows this command already updated, so
+    LIMIT stops bounding the batch; with healthy statistics it hashes the
+    subquery and scans the whole table instead.
+
+    The recipient comes from `UPDATE ... FROM`, which locks only the updated
+    rows. The joins are many-to-one through RESTRICT foreign keys, so every
+    claimed row is returned exactly once.
     """
-    due = (
-        select(Notification.id)
+    # The alias is required: with `Notification` itself SQLAlchemy correlates
+    # the subquery to the UPDATE target and drops the subquery's FROM clause.
+    due = aliased(Notification)
+    due_ids = (
+        select(due.id)
         .where(
-            Notification.status == NotificationStatus.PENDING.value,
-            Notification.next_attempt_at <= func.now(),
+            due.status == NotificationStatus.PENDING.value,
+            due.next_attempt_at <= func.now(),
         )
-        .order_by(Notification.next_attempt_at, Notification.id)
+        .order_by(due.next_attempt_at, due.id)
         .limit(batch_size)
         .with_for_update(skip_locked=True)
-        .cte("due")
-        .prefix_with("MATERIALIZED")
     )
-    claimed = (
+    return (
         update(Notification)
-        .where(Notification.id.in_(select(due.c.id)))
+        .where(
+            Notification.id == any_(func.array(due_ids.scalar_subquery())),
+            Alert.id == Notification.alert_id,
+            Field.id == Alert.field_id,
+            User.id == Field.owner_id,
+        )
         .values(
             attempts=Notification.attempts + 1,
             next_attempt_at=func.now() + timedelta(seconds=lease_seconds),
         )
         .returning(
             Notification.id,
-            Notification.alert_id,
             Notification.forecast_date,
             Notification.channel,
             Notification.probability,
             Notification.threshold,
             Notification.attempts,
-        )
-        .cte("claimed")
-    )
-    return (
-        select(
-            claimed,
             Alert.event_type,
             Field.name.label("field_name"),
             User.phone,
             User.email,
         )
-        .join(Alert, Alert.id == claimed.c.alert_id)
-        .join(Field, Field.id == Alert.field_id)
-        .join(User, User.id == Field.owner_id)
     )
 
 

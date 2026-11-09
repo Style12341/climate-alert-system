@@ -358,7 +358,16 @@ Los intervalos, reintentos y plazos de reserva están en la [especificación](do
 
 **Reintentos:** backoff exponencial con jitter, en una sola capa. Los errores permanentes pasan directo a `failed`. Los intentos se cuentan al reservar, así que una fila que hace caer al worker termina por detenerse.
 
-**Límite real del lote:** `UPDATE ... WHERE id IN (SELECT ... LIMIT n FOR UPDATE SKIP LOCKED)` puede reservar más de `n` filas con ciertos planes, porque PostgreSQL puede volver a ejecutar la subconsulta. Se reprodujo en PostgreSQL 17 con estadísticas desactualizadas. Por eso la selección se hace en una CTE `MATERIALIZED`, que se evalúa una sola vez.
+**Límite real del lote:** `UPDATE ... WHERE id IN (SELECT ... LIMIT n FOR UPDATE SKIP LOCKED)` puede reservar más de `n` filas con ciertos planes, porque PostgreSQL puede volver a ejecutar la subconsulta. Se compararon cuatro formas en PostgreSQL 17:
+
+| Forma | Estadísticas desactualizadas, lote de 5, 21 filas pendientes | 100.000 filas pendientes, estadísticas al día, lote de 500 |
+|-------|-------------------------------------------------------------|------------------------------------------------------------|
+| `UPDATE ... WHERE id IN (subconsulta)` | Reservó 21 | No medido |
+| CTE sin `MATERIALIZED` (no se integra en la consulta por el `FOR UPDATE`) | Reservó 5 | No medido |
+| CTE `MATERIALIZED` y una segunda CTE para el destinatario | Reservó 5 | Hash Semi Join sobre un recorrido completo de la tabla, 23,0 ms |
+| `UPDATE ... FROM alerts, fields, users WHERE id = ANY(ARRAY(subconsulta)) RETURNING ...` | Reservó 5, también con `force_generic_plan` | InitPlan y búsqueda por clave primaria, 7,5 ms |
+
+La CTE mantenía el lote acotado, pero recorría la tabla entera en cada reserva. Por eso la reserva es una sola sentencia con `ARRAY(...)`: PostgreSQL evalúa la subconsulta una vez, como InitPlan, y actualiza por clave primaria. `UPDATE ... FROM` no bloquea las tablas unidas, y como las uniones son de muchos a uno por claves foráneas `RESTRICT`, cada fila reservada se devuelve una sola vez.
 
 **Verificado:** la reserva final se midió con 1.152.000 filas. Ningún lote superó el tamaño pedido y ninguna fila se reservó dos veces (decisión 12).
 
@@ -493,7 +502,7 @@ Usuarios y campos no tienen endpoints propios porque pertenecen a Agrobot.
 
 **Decisión:** todas las consultas de la aplicación se construyen con el lenguaje de expresiones de SQLAlchemy, en su estilo moderno: `select()`, `insert()`, `update()`, `Mapped[]` y `mapped_column()`.
 
-**Por qué:** es la forma habitual de trabajar con el stack que pide el enunciado. Las dos sentencias críticas usan funciones específicas de PostgreSQL (`ON CONFLICT`, `SKIP LOCKED`, CTE con `UPDATE`, `unnest`), y SQLAlchemy las expresa todas. Se construyeron de esta forma y se ejecutaron sobre PostgreSQL.
+**Por qué:** es la forma habitual de trabajar con el stack que pide el enunciado. Las dos sentencias críticas usan funciones específicas de PostgreSQL (`ON CONFLICT`, `SKIP LOCKED`, `UPDATE ... FROM` con `ARRAY(...)`, `unnest`), y SQLAlchemy las expresa todas. Se construyeron de esta forma y se ejecutaron sobre PostgreSQL.
 
 **Alternativas descartadas:**
 

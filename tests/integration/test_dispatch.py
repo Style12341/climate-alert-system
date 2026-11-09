@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 import pytest
 from sqlalchemy import func, select, text, update
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 from structlog.testing import capture_logs
 
@@ -15,6 +16,7 @@ from climate_alerts.db import SessionFactory
 from climate_alerts.notifications.dispatch import (
     DispatchResult,
     Outcome,
+    build_claim_statement,
     claim_batch,
     dispatch_due,
     record_outcomes,
@@ -390,6 +392,32 @@ async def test_claim_stays_within_batch_size_with_stale_statistics(
     claimed = await claim_batch(sessions, 5, LEASE_SECONDS)
 
     assert len(claimed) == 5
+
+
+async def test_claim_picks_ids_once_and_updates_by_primary_key(
+    sessions: SessionFactory,
+) -> None:
+    """The ids must come from an InitPlan, evaluated once, not a semi join.
+
+    A semi join either re-runs the subquery per outer row, which breaks the
+    batch bound, or hashes it and scans the whole table to match against it.
+    """
+    await create_due_notifications(sessions, 1)
+    async with sessions.begin() as session:
+        await session.execute(text("ANALYZE notifications"))
+    await create_due_notifications(sessions, 20)
+
+    statement = build_claim_statement(5, LEASE_SECONDS)
+    compiled = statement.compile(
+        dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+    )
+    async with sessions() as session:
+        connection = await session.connection()
+        result = await connection.exec_driver_sql(f"EXPLAIN {compiled}")
+        plan = "\n".join(row[0] for row in result)
+
+    assert "InitPlan" in plan
+    assert "Semi Join" not in plan
 
 
 async def test_leased_rows_are_invisible(sessions: SessionFactory) -> None:
