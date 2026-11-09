@@ -151,9 +151,10 @@ WHERE id = 123 AND status = 'failed';"
 | Script | Qué hace |
 |--------|----------|
 | `scripts/license_audit.py` | Lista la licencia declarada en PyPI de cada paquete de `uv.lock`. No reemplaza una revisión legal |
+| `scripts/claim_forms.sql` | Compara las formas de la reserva de notificaciones en transacciones que se revierten. Necesita una base vacía y descartable: rechaza correr si la base ya tiene tablas. No mide el drenaje completo. El comando está en su encabezado |
 | `scripts/volume_benchmark.py` | Mide las sentencias reales a 24.000 campos. **Vacía las tablas** de la base que recibe, así que rechaza cualquier host que no sea `localhost` o `127.0.0.1` |
 
-Los resultados están en las decisiones [3](Decisiones.md#3-job-periódico-apscheduler-3x) y [12](Decisiones.md#12-volumen-y-batching).
+Los resultados están en las decisiones [3](Decisiones.md#3-job-periódico-apscheduler-3x), [12](Decisiones.md#12-volumen-y-batching) y [14](Decisiones.md#14-estado-de-entrega-next_attempt_at-como-plazo-de-reserva).
 
 ## Stack
 
