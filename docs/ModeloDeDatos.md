@@ -17,7 +17,7 @@ erDiagram
 
     users {
         bigint id PK
-        text phone UK "formato E.164"
+        text phone UK "E.164 por convención"
         text email "opcional"
         timestamptz created_at
     }
@@ -148,7 +148,7 @@ La dirección de cada canal sale de `users`: `phone` para WhatsApp y `email` par
 | Columna | Tipo | Regla |
 |---------|------|-------|
 | `id` | `BIGINT` identity | Clave primaria |
-| `phone` | `TEXT` | Obligatorio y único |
+| `phone` | `TEXT` | Obligatorio y único. E.164 por convención: la base no valida el formato |
 | `email` | `TEXT` | Opcional |
 | `created_at` | `TIMESTAMPTZ` | Por defecto, `now()` |
 
