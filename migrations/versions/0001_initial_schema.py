@@ -141,6 +141,9 @@ def upgrade() -> None:
         unique=True,
         postgresql_where=sa.text("deleted_at IS NULL"),
     )
+    # The partial index above skips deleted alerts, and the notification
+    # history reads them too.
+    op.create_index(op.f("ix_alerts_field_id"), "alerts", ["field_id"])
 
     op.create_table(
         "notifications",

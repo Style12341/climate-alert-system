@@ -29,6 +29,9 @@ class Alert(Base):
             unique=True,
             postgresql_where=column("deleted_at").is_(None),
         ),
+        # The partial index above skips deleted alerts, and the notification
+        # history reads them too.
+        Index("ix_alerts_field_id", "field_id"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)

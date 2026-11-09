@@ -72,6 +72,19 @@ def test_upgrade_check_downgrade_cycle(scratch_url: str) -> None:
     assert asyncio.run(_application_tables(scratch_url)) == ALL_TABLES
 
 
+async def test_alert_history_has_its_own_index(sessions: SessionFactory) -> None:
+    async with sessions() as session:
+        definition = await session.scalar(
+            text(
+                "SELECT indexdef FROM pg_indexes WHERE indexname = 'ix_alerts_field_id'"
+            )
+        )
+
+    assert definition is not None
+    assert "(field_id)" in definition
+    assert "WHERE" not in definition
+
+
 async def test_migration_seeds_catalog(sessions: SessionFactory) -> None:
     async with sessions() as session:
         rows = await session.execute(
