@@ -266,17 +266,34 @@ async def test_hanging_sender_times_out(
     assert result == DispatchResult(claimed=3, sent=2, retried=1, failed=0)
 
 
-async def test_row_for_disabled_channel_fails_visibly(
+async def test_row_for_channel_without_sender_is_retried(
     sessions: SessionFactory, settings: Settings
 ) -> None:
     [notification_id] = await create_due_notifications(sessions, 1, channel="sms")
 
-    await dispatch(sessions, registry(FakeSender()), settings)
+    result = await dispatch(sessions, registry(FakeSender()), settings)
+
+    row = await stored(sessions, notification_id)
+    assert row.status == "pending"
+    assert row.last_error == "no sender registered for channel sms"
+    assert 25 <= await seconds_until_next_attempt(sessions, notification_id) <= 60
+    assert result == DispatchResult(claimed=1, sent=0, retried=1, failed=0)
+
+
+async def test_row_for_channel_without_sender_fails_at_the_maximum(
+    sessions: SessionFactory, settings: Settings
+) -> None:
+    # The claim raises attempts to the maximum of 8.
+    [notification_id] = await create_due_notifications(
+        sessions, 1, channel="sms", attempts=7
+    )
+
+    result = await dispatch(sessions, registry(FakeSender()), settings)
 
     row = await stored(sessions, notification_id)
     assert row.status == "failed"
-    assert row.last_error is not None
-    assert "sms" in row.last_error
+    assert row.last_error == "no sender registered for channel sms"
+    assert result == DispatchResult(claimed=1, sent=0, retried=0, failed=1)
 
 
 async def test_missing_address_marks_failed(

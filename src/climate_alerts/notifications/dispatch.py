@@ -176,7 +176,9 @@ async def deliver(
 
     sender = senders.get(notification.channel)
     if sender is None:
-        return failed(f"no sender registered for channel {notification.channel}")
+        # Transient on purpose: a replica mid-rollout may not know a channel
+        # yet, and that must not permanently fail a deliverable notification.
+        return retry_or_fail(f"no sender registered for channel {notification.channel}")
 
     try:
         async with asyncio.timeout(settings.dispatch_send_timeout_seconds):
@@ -212,6 +214,10 @@ async def record_outcomes(
     The `attempts` filter is the fence: once a lease expires and another
     dispatcher claims the row, `attempts` has moved on and this update matches
     nothing, so the dispatcher that lost the lease cannot overwrite the result.
+
+    The `status` filter covers what `attempts` cannot: a row that already
+    reached `sent` or `failed` keeps the same `attempts`, so without it a late
+    or repeated outcome with a matching value could overwrite the final state.
     """
     async with sessions.begin() as session:
         for outcome in outcomes:
