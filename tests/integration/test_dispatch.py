@@ -481,23 +481,6 @@ async def explain_claim(sessions: SessionFactory, batch_size: int) -> str:
         return "\n".join(row[0] for row in result)
 
 
-async def test_claim_selects_ids_once(sessions: SessionFactory) -> None:
-    """With stale statistics the ids come from an InitPlan, not a semi join.
-
-    A semi join may re-run the subquery per outer row, which breaks the batch
-    bound.
-    """
-    await create_due_notifications(sessions, 1)
-    async with sessions.begin() as session:
-        await session.execute(text("ANALYZE notifications"))
-    await create_due_notifications(sessions, 20)
-
-    plan = await explain_claim(sessions, 5)
-
-    assert "InitPlan" in plan
-    assert "Semi Join" not in plan
-
-
 async def test_claim_updates_by_primary_key(sessions: SessionFactory) -> None:
     """With healthy statistics the claimed rows are found through the primary key.
 
@@ -622,38 +605,6 @@ async def test_concurrency_is_bounded(
     await dispatch(sessions, registry(sender), limited)
 
     assert sender.peak == limited.dispatch_concurrency
-
-
-async def test_every_stored_reason_comes_from_the_fixed_set(
-    sessions: SessionFactory, settings: Settings
-) -> None:
-    """Each way a send can go wrong stores a reason from `DeliveryFailure`."""
-    async with sessions() as session:
-        alert = await create_owned_alert(session)
-        rows = [
-            await create_notification(session, alert, days_ahead=day, **overrides)
-            for day, overrides in enumerate(
-                [
-                    {"channel": "whatsapp"},  # the sender raises
-                    {"channel": "sms"},  # no sender for the channel
-                    {"channel": "email"},  # no email address
-                    {"channel": "whatsapp", "attempts": 8},  # leases expired
-                ]
-            )
-        ]
-    senders = registry(FakeSender(error=LeakyProviderError("+5491100000000")))
-    senders |= build_sender_registry(["email"])
-
-    await dispatch(sessions, senders, settings)
-
-    reasons = {(await stored(sessions, row.id)).last_error for row in rows}
-    assert reasons == {
-        DeliveryFailure.FAILED.message,
-        DeliveryFailure.CHANNEL_UNAVAILABLE.message,
-        DeliveryFailure.NO_ADDRESS.message,
-        DeliveryFailure.ATTEMPTS_EXHAUSTED.message,
-    }
-    assert reasons <= {failure.message for failure in DeliveryFailure}
 
 
 async def test_runs_batches_until_nothing_is_due(

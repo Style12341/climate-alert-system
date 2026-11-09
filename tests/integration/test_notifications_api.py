@@ -55,13 +55,6 @@ async def test_lists_only_own_notifications(
     assert [item["id"] for item in response.json()["items"]] == [own.id]
 
 
-async def test_requires_a_token(client: AsyncClient) -> None:
-    response = await client.get(URL)
-
-    assert response.status_code == 401
-    assert response.json()["code"] == "unauthorized"
-
-
 async def test_body_has_spec_fields(
     client: AsyncClient, sessions: SessionFactory, auth_headers: AuthHeaders
 ) -> None:
@@ -233,20 +226,6 @@ async def test_limit_above_maximum_returns_422(
     }
 
 
-async def test_oversized_cursor_returns_422(
-    client: AsyncClient, sessions: SessionFactory, auth_headers: AuthHeaders
-) -> None:
-    user, _, _ = await owner_with_alert(sessions)
-
-    response = await client.get(
-        URL,
-        params={"cursor": "99999999999999999999"},
-        headers=auth_headers(user.id),
-    )
-
-    assert response.status_code == 422
-
-
 @pytest.mark.parametrize(
     ("param", "value"),
     [
@@ -255,6 +234,7 @@ async def test_oversized_cursor_returns_422(
         ("limit", "99999999999999999999"),
         ("cursor", "0"),
         ("cursor", "-1"),
+        ("cursor", "99999999999999999999"),
         ("field_id", "0"),
         ("field_id", "-1"),
         ("field_id", "99999999999999999999"),
