@@ -2,6 +2,8 @@
 
 Safe to run repeatedly. It does not reset anything: forecasts from earlier days
 stay in place, and alerts or fields changed since the last run are left alone.
+A seeded alert that was soft-deleted comes back as a new alert on a re-run,
+because the uniqueness rule only covers live alerts.
 """
 
 import asyncio
