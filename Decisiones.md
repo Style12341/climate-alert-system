@@ -301,6 +301,21 @@ Un sistema recién desplegado tiene esa tabla vacía justo en su primera corrida
 
 La base no es el cuello de botella. La medición inicial procesó entre 28.900 y 68.100 filas por segundo con envío simulado. El código final procesa unas 1.335 filas por segundo (ver la medición final), cerca de 17 veces los 80 mensajes por segundo que Meta documenta por número.
 
+**Con un límite mayor del proveedor.** Meta sube un número a 1.000 mensajes por segundo de forma automática cuando se cumplen tres condiciones: el portafolio tiene límite de mensajería ilimitado, el número escribió a 100.000 usuarios únicos o más fuera de la ventana de atención en 24 horas, y su calidad es media o mejor ([throughput](https://developers.facebook.com/documentation/business-messaging/whatsapp/throughput/)). No depende del tipo de cuenta, sino de cada número.
+
+El sistema no tiene un parámetro de mensajes por segundo. El ritmo lo fijan `DISPATCH_CONCURRENCY` y la duración de cada envío: con 40 envíos en paralelo y 500 ms por envío, son unos 80 por segundo. Nada impide superar el límite del proveedor. Si se supera, Meta responde con el error `130429`, que se trata como transitorio y se reintenta: la notificación no se pierde, pero consume intentos.
+
+Registrar los resultados de un lote de 500 lleva unos 0,36 s (836,9 s en 2.304 lotes), y ese tiempo se suma al del envío:
+
+| Límite del proveedor | Enviar 500 | Registrar 500 | Máximo por dispatcher |
+|----------------------|------------|---------------|-----------------------|
+| 80 por segundo | 6,25 s | 0,36 s | Unos 75 por segundo. El registro es el 5 % del ciclo |
+| 1.000 por segundo | 0,5 s | 0,36 s | Unos 570 por segundo. El registro es el 42 % del ciclo |
+
+Llegar a 1.000 por segundo no requiere cambiar código. Basta con subir `DISPATCH_CONCURRENCY` (a unos 500 si cada envío tarda 500 ms) y correr una segunda réplica del worker, por ejemplo con `docker compose up --scale worker=2`. Los dispatchers concurrentes están probados: cada notificación se envía una sola vez. Cada réplica también corre la evaluación, que no duplica notificaciones pero repite el trabajo.
+
+La alternativa con una sola réplica es registrar los envíos exitosos con un único `UPDATE` por lote. Es un cambio de código pequeño que no se hizo, porque a 80 por segundo el registro pesa solo el 5 %.
+
 **Medición final** (9 de noviembre de 2026, repetida después de pasar la reserva a una sola sentencia): `scripts/volume_benchmark.py` usa `build_evaluation_statement`, `build_claim_statement`, `record_outcomes` y el esquema real de la migración. Corrió con PostgreSQL 17.11 sin ajustes, 28 CPU lógicas, un canal y `notifications` analizada vacía.
 
 | Escenario | Tiempo | WAL | Memoria máxima del cliente |
@@ -329,7 +344,7 @@ La base no es el cuello de botella. La medición inicial procesó entre 28.900 y
 
 - Las cifras de la tabla inicial salen de un benchmark descartable, con sentencias anteriores a las finales. Las sentencias finales están en la medición final.
 - El supuesto de 3 alertas por campo no tiene respaldo en datos reales.
-- Las colas no se probaron de forma sostenida. En la medición inicial autovacuum no llegó a correr. En la final corrió 8 veces, pero sigue siendo una sola corrida de 15 minutos.
+- Las colas no se probaron de forma sostenida. En la medición inicial autovacuum no llegó a correr. En la final corrió 7 veces, pero sigue siendo una sola corrida de 15 minutos.
 - Una entrega escribe entre 1 y 1,2 GiB de WAL por cada 1,15 millones de filas, porque `status` forma parte del índice parcial. Con volúmenes normales no es relevante.
 - Si el worker está caído hasta que pasa la fecha del pronóstico, ese día ya no se evalúa.
 
