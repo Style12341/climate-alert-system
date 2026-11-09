@@ -36,7 +36,9 @@ from pathlib import Path
 LOCK_FILE = Path(__file__).resolve().parent.parent / "uv.lock"
 PROJECT = "climate-alerts"
 COPYLEFT = re.compile(
-    r"\b(A?GPL|LGPL|MPL|EUPL|SSPL|BUSL|CC-BY-SA)|Commons Clause|GNU|Mozilla", re.I
+    r"\b(A?GPL|LGPL|MPL|EPL|EUPL|CDDL|OSL|CeCILL|SSPL|BUSL|CC-BY-SA)"
+    r"|Commons Clause|GNU|Mozilla",
+    re.I,
 )
 # package name -> where the justification lives. Add a package only after
 # writing down why its license is acceptable.

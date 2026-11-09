@@ -5,9 +5,10 @@ Run: BENCHMARK_DATABASE_URL=postgresql+asyncpg://user:pass@127.0.0.1:PORT/db \\
      uv run python scripts/volume_benchmark.py
 
 DESTRUCTIVE: it migrates the target database and TRUNCATES every table except
-the event catalog. It refuses any host but localhost or 127.0.0.1, and it reads
-its own variable, not DATABASE_URL, so it cannot pick up the application's
-database by accident. Point it at a throwaway `postgres:17` container.
+the event catalog. It refuses any host but localhost or 127.0.0.1, refuses
+`host` or `port` in the query string, and reads its own variable, not
+DATABASE_URL, so it cannot pick up the application's database by accident.
+Point it at a throwaway `postgres:17` container.
 
 It loads 24,000 farms, 16 days, 7 events and 3 alerts per farm through the
 schema of the migration, with every forecast over its threshold. It then runs
@@ -46,6 +47,7 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from alembic import command
 from alembic.config import Config
@@ -131,6 +133,14 @@ def checked_database_url() -> URL:
     if not raw:
         raise SystemExit("set BENCHMARK_DATABASE_URL to a throwaway local database")
     url = make_url(raw)
+    # asyncpg takes these from the query string over the host in the URL, so
+    # checking `url.host` alone would pass a remote target.
+    overrides = sorted(set(url.query) & {"host", "port"})
+    if overrides:
+        raise SystemExit(
+            f"refusing query parameters {overrides}: they override the host "
+            "and this script truncates tables"
+        )
     if url.host not in ALLOWED_HOSTS:
         raise SystemExit(
             f"refusing host {url.host!r}: this script truncates tables, "
@@ -159,7 +169,7 @@ def require(actual: float, expected: float, what: str) -> None:
         raise RuntimeError(f"{what}: expected {expected}, got {actual}")
 
 
-async def scalar(monitor: AsyncConnection, sql: str) -> float:
+async def scalar(monitor: AsyncConnection, sql: str) -> Any:
     return (await monitor.exec_driver_sql(sql)).scalar_one()
 
 
