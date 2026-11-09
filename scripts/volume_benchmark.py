@@ -32,7 +32,7 @@ Traps, because getting these wrong is quiet:
 
 * The empty `notifications` table must be ANALYZEd before the run. That is the
   state of a fresh deployment and the one where an anti-join plan collapsed
-  (decision 12), so the script checks `reltuples` instead of assuming it.
+  (decision 10), so the script checks `reltuples` instead of assuming it.
 * WAL deltas include anything else writing at that moment, such as autovacuum
   or full-page images after a checkpoint. Read them as upper bounds.
 * Peak memory is VmHWM from /proc/self/status. `ru_maxrss` survives exec and
