@@ -1,0 +1,430 @@
+import asyncio
+from collections import Counter
+from collections.abc import Mapping
+from datetime import timedelta
+from typing import Any
+
+from sqlalchemy import func, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+from structlog.testing import capture_logs
+
+from climate_alerts.alerts.models import Alert
+from climate_alerts.config import Settings
+from climate_alerts.db import SessionFactory
+from climate_alerts.notifications.dispatch import (
+    DispatchResult,
+    Outcome,
+    claim_batch,
+    dispatch_due,
+    record_outcomes,
+)
+from climate_alerts.notifications.models import Notification, NotificationStatus
+from climate_alerts.notifications.senders import (
+    NotificationSender,
+    OutboundNotification,
+    PermanentDeliveryError,
+    build_sender_registry,
+)
+from tests.integration.factories import (
+    create_alert,
+    create_field,
+    create_notification,
+    create_user,
+)
+
+LEASE_SECONDS = 300
+
+
+class FakeSender:
+    """Records every call, then fails or hangs as configured."""
+
+    def __init__(
+        self,
+        channel: str = "whatsapp",
+        error: Exception | None = None,
+        hang_ids: frozenset[int] = frozenset(),
+    ) -> None:
+        self.channel = channel
+        self.error = error
+        self.hang_ids = hang_ids
+        self.calls: list[int] = []
+
+    async def send(self, notification: OutboundNotification) -> None:
+        self.calls.append(notification.notification_id)
+        if notification.notification_id in self.hang_ids:
+            await asyncio.Event().wait()
+        if self.error is not None:
+            raise self.error
+
+
+class PeakTrackingSender:
+    channel = "whatsapp"
+
+    def __init__(self) -> None:
+        self.current = self.peak = 0
+
+    async def send(self, notification: OutboundNotification) -> None:
+        self.current += 1
+        self.peak = max(self.peak, self.current)
+        await asyncio.sleep(0.01)
+        self.current -= 1
+
+
+def registry(*senders: NotificationSender) -> dict[str, NotificationSender]:
+    return {sender.channel: sender for sender in senders}
+
+
+async def create_owned_alert(session: AsyncSession, email: str | None = None) -> Alert:
+    user = await create_user(session, email=email)
+    field = await create_field(session, user, name="La Esperanza")
+    return await create_alert(session, field)
+
+
+async def create_due_notifications(
+    sessions: SessionFactory, count: int, **overrides: Any
+) -> list[int]:
+    async with sessions() as session:
+        alert = await create_owned_alert(session)
+        created = [
+            await create_notification(session, alert, days_ahead=day, **overrides)
+            for day in range(count)
+        ]
+    return [notification.id for notification in created]
+
+
+async def stored(sessions: SessionFactory, notification_id: int) -> Notification:
+    async with sessions() as session:
+        return await session.get_one(Notification, notification_id)
+
+
+async def expire_leases(sessions: SessionFactory) -> None:
+    async with sessions.begin() as session:
+        await session.execute(
+            update(Notification)
+            .where(Notification.status == NotificationStatus.PENDING.value)
+            .values(next_attempt_at=func.now() - timedelta(seconds=1))
+        )
+
+
+async def dispatch(
+    sessions: SessionFactory,
+    senders: Mapping[str, NotificationSender],
+    settings: Settings,
+) -> DispatchResult:
+    return await dispatch_due(sessions, senders, settings, asyncio.Event())
+
+
+async def test_success_marks_sent(sessions: SessionFactory, settings: Settings) -> None:
+    [notification_id] = await create_due_notifications(sessions, 1)
+
+    result = await dispatch(sessions, registry(FakeSender()), settings)
+
+    row = await stored(sessions, notification_id)
+    assert row.status == "sent"
+    assert row.sent_at is not None
+    assert row.last_error is None
+    assert result == DispatchResult(claimed=1, sent=1, retried=0, failed=0)
+
+
+async def test_permanent_error_marks_failed(
+    sessions: SessionFactory, settings: Settings
+) -> None:
+    [notification_id] = await create_due_notifications(sessions, 1)
+    sender = FakeSender(error=PermanentDeliveryError("address rejected"))
+
+    result = await dispatch(sessions, registry(sender), settings)
+
+    row = await stored(sessions, notification_id)
+    assert row.status == "failed"
+    assert row.last_error == "address rejected"
+    assert sender.calls == [notification_id]
+    assert result == DispatchResult(claimed=1, sent=0, retried=0, failed=1)
+
+
+async def test_transient_error_schedules_retry(
+    sessions: SessionFactory, settings: Settings
+) -> None:
+    [notification_id] = await create_due_notifications(sessions, 1)
+    sender = FakeSender(error=RuntimeError("provider said something private"))
+
+    result = await dispatch(sessions, registry(sender), settings)
+
+    row = await stored(sessions, notification_id)
+    assert row.status == "pending"
+    assert row.last_error is not None
+    # Only messages we control reach the column.
+    assert "private" not in row.last_error
+    assert "RuntimeError" in row.last_error
+    async with sessions() as session:
+        assert await session.scalar(select(func.now() < Notification.next_attempt_at))
+    assert result == DispatchResult(claimed=1, sent=0, retried=1, failed=0)
+
+
+async def test_last_attempt_marks_failed(
+    sessions: SessionFactory, settings: Settings
+) -> None:
+    # The claim raises attempts to the maximum of 8.
+    [notification_id] = await create_due_notifications(sessions, 1, attempts=7)
+    sender = FakeSender(error=RuntimeError("down"))
+
+    await dispatch(sessions, registry(sender), settings)
+
+    row = await stored(sessions, notification_id)
+    assert row.attempts == 8
+    assert row.status == "failed"
+    assert row.last_error is not None
+    assert sender.calls == [notification_id]
+
+
+async def test_expired_leases_exhaust_attempts(
+    sessions: SessionFactory, settings: Settings
+) -> None:
+    # The claim raises attempts to 9, above the maximum of 8.
+    [notification_id] = await create_due_notifications(sessions, 1, attempts=8)
+    sender = FakeSender()
+
+    result = await dispatch(sessions, registry(sender), settings)
+
+    row = await stored(sessions, notification_id)
+    assert row.attempts == 9
+    assert row.status == "failed"
+    assert row.last_error is not None
+    assert sender.calls == []
+    assert result.failed == 1
+
+
+async def test_hanging_sender_times_out(
+    sessions: SessionFactory, settings: Settings
+) -> None:
+    hanging, *others = await create_due_notifications(sessions, 3)
+    sender = FakeSender(hang_ids=frozenset({hanging}))
+    fast = settings.model_copy(update={"dispatch_send_timeout_seconds": 0.05})
+
+    result = await dispatch(sessions, registry(sender), fast)
+
+    row = await stored(sessions, hanging)
+    assert row.status == "pending"
+    assert row.last_error is not None
+    assert "timed out" in row.last_error
+    for other in others:
+        assert (await stored(sessions, other)).status == "sent"
+    assert result == DispatchResult(claimed=3, sent=2, retried=1, failed=0)
+
+
+async def test_row_for_disabled_channel_fails_visibly(
+    sessions: SessionFactory, settings: Settings
+) -> None:
+    [notification_id] = await create_due_notifications(sessions, 1, channel="sms")
+
+    await dispatch(sessions, registry(FakeSender()), settings)
+
+    row = await stored(sessions, notification_id)
+    assert row.status == "failed"
+    assert row.last_error is not None
+    assert "sms" in row.last_error
+
+
+async def test_missing_address_marks_failed(
+    sessions: SessionFactory, settings: Settings
+) -> None:
+    [notification_id] = await create_due_notifications(sessions, 1, channel="email")
+
+    await dispatch(sessions, build_sender_registry(["email"]), settings)
+
+    row = await stored(sessions, notification_id)
+    assert row.status == "failed"
+    assert row.last_error is not None
+    assert "email" in row.last_error
+
+
+async def test_channels_fail_independently(
+    sessions: SessionFactory, settings: Settings
+) -> None:
+    async with sessions() as session:
+        alert = await create_owned_alert(session, email="maria@example.com")
+        whatsapp = await create_notification(session, alert, channel="whatsapp")
+        email = await create_notification(session, alert, channel="email")
+    whatsapp_sender = FakeSender("whatsapp")
+    email_sender = FakeSender("email", error=RuntimeError("smtp down"))
+    senders = registry(whatsapp_sender, email_sender)
+
+    await dispatch(sessions, senders, settings)
+
+    assert (await stored(sessions, whatsapp.id)).status == "sent"
+    assert (await stored(sessions, email.id)).status == "pending"
+
+    await expire_leases(sessions)
+    email_sender.error = None
+    await dispatch(sessions, senders, settings)
+
+    assert whatsapp_sender.calls == [whatsapp.id]
+    assert email_sender.calls == [email.id, email.id]
+    assert (await stored(sessions, email.id)).status == "sent"
+
+
+async def test_claim_respects_batch_size_and_order(
+    sessions: SessionFactory,
+) -> None:
+    newest, middle, oldest = await create_due_notifications(sessions, 3)
+    async with sessions.begin() as session:
+        for notification_id, age in ((newest, 10), (middle, 20), (oldest, 30)):
+            await session.execute(
+                update(Notification)
+                .where(Notification.id == notification_id)
+                .values(next_attempt_at=func.now() - timedelta(seconds=age))
+            )
+
+    claimed = await claim_batch(sessions, 2, LEASE_SECONDS)
+
+    # RETURNING has no order, and the old due time is gone by then: what the
+    # ordering guarantees is which rows the batch takes.
+    assert {item.notification.notification_id for item in claimed} == {oldest, middle}
+    assert all(item.attempts == 1 for item in claimed)
+
+
+async def test_claim_returns_what_a_sender_needs(sessions: SessionFactory) -> None:
+    async with sessions() as session:
+        alert = await create_owned_alert(session, email="maria@example.com")
+        notification = await create_notification(session, alert, channel="email")
+
+    [claimed] = await claim_batch(sessions, 10, LEASE_SECONDS)
+
+    outbound = claimed.notification
+    assert outbound.notification_id == notification.id
+    assert outbound.channel == "email"
+    assert outbound.recipient.email == "maria@example.com"
+    assert outbound.recipient.phone.startswith("+")
+    assert outbound.field_name == "La Esperanza"
+    assert outbound.event_type == "frost"
+    assert outbound.forecast_date == notification.forecast_date
+    assert outbound.probability == notification.probability
+    assert outbound.threshold == notification.threshold
+
+
+async def test_leased_rows_are_invisible(sessions: SessionFactory) -> None:
+    await create_due_notifications(sessions, 2)
+
+    first = await claim_batch(sessions, 10, LEASE_SECONDS)
+    second = await claim_batch(sessions, 10, LEASE_SECONDS)
+
+    assert len(first) == 2
+    assert second == []
+
+
+async def test_expired_lease_is_reclaimed(sessions: SessionFactory) -> None:
+    [notification_id] = await create_due_notifications(sessions, 1)
+    await claim_batch(sessions, 10, LEASE_SECONDS)
+
+    await expire_leases(sessions)
+    [reclaimed] = await claim_batch(sessions, 10, LEASE_SECONDS)
+
+    assert reclaimed.notification.notification_id == notification_id
+    assert reclaimed.attempts == 2
+
+
+async def test_stale_dispatcher_cannot_overwrite(sessions: SessionFactory) -> None:
+    [notification_id] = await create_due_notifications(sessions, 1)
+    await claim_batch(sessions, 10, LEASE_SECONDS)
+    await expire_leases(sessions)
+    await claim_batch(sessions, 10, LEASE_SECONDS)
+
+    stale = Outcome(notification_id, 1, "sent", None, None)
+    await record_outcomes(sessions, [stale])
+
+    row = await stored(sessions, notification_id)
+    assert row.status == "pending"
+    assert row.sent_at is None
+    assert row.attempts == 2
+
+    # The dispatcher that holds the current lease can still record its result.
+    await record_outcomes(sessions, [Outcome(notification_id, 2, "sent", None, None)])
+    assert (await stored(sessions, notification_id)).status == "sent"
+
+
+async def test_concurrent_dispatchers_send_once(
+    sessions: SessionFactory, settings: Settings
+) -> None:
+    ids = await create_due_notifications(sessions, 50)
+    sender = FakeSender()
+    small_batches = settings.model_copy(update={"dispatch_batch_size": 7})
+
+    await asyncio.gather(
+        *(dispatch(sessions, registry(sender), small_batches) for _ in range(4))
+    )
+
+    assert Counter(sender.calls) == Counter(ids)
+    for notification_id in ids:
+        assert (await stored(sessions, notification_id)).status == "sent"
+
+
+async def test_concurrency_is_bounded(
+    sessions: SessionFactory, settings: Settings
+) -> None:
+    await create_due_notifications(sessions, 12)
+    sender = PeakTrackingSender()
+    limited = settings.model_copy(update={"dispatch_concurrency": 3})
+
+    await dispatch(sessions, registry(sender), limited)
+
+    assert sender.peak == limited.dispatch_concurrency
+
+
+async def test_error_is_truncated(sessions: SessionFactory, settings: Settings) -> None:
+    [notification_id] = await create_due_notifications(sessions, 1)
+    sender = FakeSender(error=PermanentDeliveryError("x" * 600))
+
+    await dispatch(sessions, registry(sender), settings)
+
+    row = await stored(sessions, notification_id)
+    assert row.last_error is not None
+    assert len(row.last_error) == 500
+
+
+async def test_runs_batches_until_nothing_is_due(
+    sessions: SessionFactory, settings: Settings
+) -> None:
+    await create_due_notifications(sessions, 5)
+    sender = FakeSender()
+    small_batches = settings.model_copy(update={"dispatch_batch_size": 2})
+
+    result = await dispatch(sessions, registry(sender), small_batches)
+
+    assert result == DispatchResult(claimed=5, sent=5, retried=0, failed=0)
+
+
+async def test_stopping_prevents_the_next_batch(
+    sessions: SessionFactory, settings: Settings
+) -> None:
+    await create_due_notifications(sessions, 3)
+    stopping = asyncio.Event()
+
+    class StopsAfterFirstSend(FakeSender):
+        async def send(self, notification: OutboundNotification) -> None:
+            await super().send(notification)
+            stopping.set()
+
+    sender = StopsAfterFirstSend()
+    one_at_a_time = settings.model_copy(update={"dispatch_batch_size": 1})
+
+    result = await dispatch_due(sessions, registry(sender), one_at_a_time, stopping)
+
+    assert result == DispatchResult(claimed=1, sent=1, retried=0, failed=0)
+
+
+async def test_logs_completion_without_addresses(
+    sessions: SessionFactory, settings: Settings
+) -> None:
+    async with sessions() as session:
+        alert = await create_owned_alert(session, email="maria@example.com")
+        await create_notification(session, alert, channel="email")
+
+    with capture_logs() as logs:
+        await dispatch(sessions, build_sender_registry(["email"]), settings)
+
+    [completed] = [log for log in logs if log["event"] == "dispatch.completed"]
+    assert completed["claimed"] == 1
+    assert completed["sent"] == 1
+    assert completed["retried"] == 0
+    assert completed["failed"] == 0
+    assert completed["duration_ms"] >= 0
+    assert "maria@example.com" not in str(logs)
