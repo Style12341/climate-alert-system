@@ -77,6 +77,20 @@ async def test_below_threshold_does_not_notify(
     assert result.created == 0
 
 
+async def test_forecast_for_another_event_does_not_notify(
+    sessions: SessionFactory, settings: Settings
+) -> None:
+    async with sessions() as session:
+        field, _ = await create_field_with_alert(session, threshold="50")
+        await create_forecast(session, field, 1, "90", event_type="rain")
+        await create_forecast(session, field, 1, "10")
+
+    result = await evaluate(sessions, settings)
+
+    assert result.created == 0
+    assert await stored_notifications(sessions) == []
+
+
 async def test_rerun_creates_nothing(
     sessions: SessionFactory, settings: Settings
 ) -> None:

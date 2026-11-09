@@ -373,7 +373,43 @@ async def test_channels_fail_independently(
 
     assert whatsapp_sender.calls == [whatsapp.id]
     assert email_sender.calls == [email.id, email.id]
-    assert (await stored(sessions, email.id)).status == "sent"
+    row = await stored(sessions, email.id)
+    assert row.status == "sent"
+    assert row.last_error is None
+
+
+async def test_settled_rows_are_never_claimed_again(
+    sessions: SessionFactory, settings: Settings
+) -> None:
+    async with sessions() as session:
+        alert = await create_owned_alert(session)
+        sent = [
+            await create_notification(session, alert, days_ahead=day)
+            for day in range(2)
+        ]
+        failed = await create_notification(session, alert, channel="email")
+    whatsapp_sender = FakeSender("whatsapp")
+    email_sender = FakeSender(
+        "email", error=PermanentDeliveryError(DeliveryFailure.NO_ADDRESS)
+    )
+    senders = registry(whatsapp_sender, email_sender)
+    await dispatch(sessions, senders, settings)
+    # Every row due again, whatever its status.
+    async with sessions.begin() as session:
+        await session.execute(
+            update(Notification).values(
+                next_attempt_at=func.now() - timedelta(seconds=1)
+            )
+        )
+
+    result = await dispatch(sessions, senders, settings)
+
+    assert result == DispatchResult(claimed=0, sent=0, retried=0, failed=0)
+    assert sorted(whatsapp_sender.calls) == [row.id for row in sent]
+    assert email_sender.calls == [failed.id]
+    for row in sent:
+        assert (await stored(sessions, row.id)).status == "sent"
+    assert (await stored(sessions, failed.id)).status == "failed"
 
 
 async def test_claim_respects_batch_size_and_order(
