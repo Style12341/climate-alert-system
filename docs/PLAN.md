@@ -1,6 +1,6 @@
 # Climate Alert System Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> Implementation plan as written before the code, kept unchanged as a record. Unticked boxes and test names that were later superseded are expected. Where it differs from the code, the code and [`Decisiones.md`](Decisiones.md) are authoritative.
 
 **Goal:** Build the climate alert system described in the PRD: alert configuration API, periodic evaluation, durable multi-channel delivery, mock data and deliverables.
 
@@ -20,7 +20,6 @@
 - No phone numbers or emails in logs.
 - No abstraction beyond `NotificationSender`. No repository layer.
 - Integration tests run on real PostgreSQL 17. Nothing is mocked at the database boundary.
-- Conventional commits with no `Co-Authored-By` or any AI attribution.
 - Commands run from the repository root. Each task ends with `uv run ruff check . && uv run mypy src && uv run pytest` passing.
 
 ## Review Focus
@@ -593,10 +592,8 @@ Expected: all assertions pass.
 
 - [ ] **Step 3: Verify it converts for Bruno**
 
-Run `postmanToBruno` from `@usebruno/converters` on the collection with a short script in the scratchpad.
+Run `postmanToBruno` from `@usebruno/converters` on the collection.
 Expected: no skipped items, and the converted status checks do not contain untranslated `pm.`.
-
-If `npx` is blocked by the permission system, stop and report it to the user rather than working around it.
 
 - [ ] **Step 4: Commit**
 
@@ -613,7 +610,7 @@ git add -A && git commit -m "docs: add API collection for manual testing"
 - Modify: `README.md`, `Decisiones.md`, `ModeloDeDatos.md`, `procedimiento.md`
 
 **Interfaces:**
-- Consumes: `build_evaluation_statement`, `build_claim_statement`, and the scratchpad audit and benchmark work.
+- Consumes: `build_evaluation_statement`, `build_claim_statement`.
 
 - [ ] **Step 1: Promote the license audit and run it on the full dependency tree**
 
@@ -628,7 +625,7 @@ Expected: worst-case evaluation stays near the 10 s measured earlier. Record the
 
 - [ ] **Step 3: Check the diagrams**
 
-Render the Mermaid blocks in `ModeloDeDatos.md`. Automated rendering was blocked by the permission system earlier, so if it is still blocked, ask the user to confirm them in a Mermaid preview.
+Render the Mermaid blocks in `ModeloDeDatos.md`.
 
 - [ ] **Step 4: Finish the documents**
 
@@ -638,10 +635,6 @@ In `README.md`: how to run it, how to get a token, how to use `collection/`, how
 
 Run: `uv run ruff check . && uv run ruff format --check . && uv run mypy src && uv run pytest`, then repeat the clean start from Task 10.
 Expected: everything passes.
-
-- [ ] **Step 6: Run the four lens reviews and fix findings**
-
-Run `review-risk`, `review-resilience`, `review-readability` and `review-reliability` over the full diff. Fix Critical and Important findings test-first, then rerun Step 5.
 
 - [ ] **Step 7: Commit**
 
