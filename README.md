@@ -29,6 +29,28 @@ Para borrar todo, incluidos los datos:
 docker compose down -v
 ```
 
+## Correrlo sin Docker
+
+Hacen falta [uv](https://docs.astral.sh/uv/) y un PostgreSQL 17 con una base y un usuario que coincidan con `DATABASE_URL`.
+
+1. Copiar `.env.example` a `.env` y completar `DATABASE_URL` y `JWT_SECRET`, de al menos 32 caracteres. El archivo lista todas las variables con sus valores por defecto.
+2. Exportar las variables. La API, el worker y el comando de datos simulados leen `.env` del directorio actual, pero las migraciones solo leen el entorno (`migrations/env.py` usa `os.environ["DATABASE_URL"]`):
+
+   ```bash
+   set -a; . ./.env; set +a
+   ```
+
+3. Desde la raíz del repositorio, aplicar las migraciones, cargar los datos simulados y arrancar la API y el worker, cada uno en su terminal:
+
+   ```bash
+   uv run alembic upgrade head
+   uv run python -m climate_alerts.agrobot.seed
+   uv run uvicorn --factory climate_alerts.api.app:create_app
+   uv run python -m climate_alerts.worker
+   ```
+
+La API queda en <http://localhost:8000>. El comando de datos simulados imprime los tokens en su salida.
+
 ## Obtener un token
 
 La API se autentica con un JWT. El comando de datos simulados imprime uno por usuario:
