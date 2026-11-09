@@ -28,7 +28,7 @@ RUN ["uv", "sync", "--locked", "--no-dev", "--no-editable"]
 
 FROM python:3.14-slim AS runtime
 
-RUN ["useradd", "--system", "--uid", "10001", "--no-create-home", "--shell", "/usr/sbin/nologin", "app"]
+RUN ["useradd", "--uid", "10001", "--no-create-home", "--shell", "/usr/sbin/nologin", "app"]
 
 WORKDIR /app
 

@@ -59,7 +59,17 @@ services:
     environment:
       <<: *app-environment
     ports:
-      - "8000:8000"
+      # Loopback only: JWT_SECRET in this file is public, so anyone who could
+      # reach this port could sign a token.
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      # Python, because the image has no curl. urlopen raises on the 503.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
     depends_on:
       seed:
         condition: service_completed_successfully
@@ -72,6 +82,7 @@ services:
       NOTIFICATION_CHANNELS: whatsapp,email
     # Above WORKER_SHUTDOWN_TIMEOUT_SECONDS (25), so a drain ends before SIGKILL.
     stop_grace_period: 30s
+    restart: unless-stopped
     depends_on:
       seed:
         condition: service_completed_successfully
