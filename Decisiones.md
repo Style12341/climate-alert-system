@@ -333,6 +333,8 @@ Los intervalos, reintentos y plazos de reserva están en la [especificación](do
 
 **Reintentos:** backoff exponencial con jitter, en una sola capa. Los errores permanentes pasan directo a `failed`. Los intentos se cuentan al reservar, así que una fila que hace caer al worker termina por detenerse.
 
+**Límite real del lote:** `UPDATE ... WHERE id IN (SELECT ... LIMIT n FOR UPDATE SKIP LOCKED)` puede reservar más de `n` filas con ciertos planes, porque PostgreSQL puede volver a ejecutar la subconsulta. Se reprodujo en PostgreSQL 17 con estadísticas desactualizadas. Por eso la selección se hace en una CTE `MATERIALIZED`, que se evalúa una sola vez.
+
 **Límite aceptado:** esta reserva difiere levemente de la que se midió en el benchmark, por lo que se vuelve a verificar en la implementación.
 
 ## 15. Alertas: sin `user_id` y sin pausa

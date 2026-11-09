@@ -2,9 +2,10 @@ import asyncio
 from collections import Counter
 from collections.abc import Mapping
 from datetime import timedelta
-from typing import Any
+from typing import Any, Literal
 
-from sqlalchemy import func, select, update
+import pytest
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from structlog.testing import capture_logs
 
@@ -301,6 +302,25 @@ async def test_claim_returns_what_a_sender_needs(sessions: SessionFactory) -> No
     assert outbound.threshold == notification.threshold
 
 
+async def test_claim_stays_within_batch_size_with_stale_statistics(
+    sessions: SessionFactory,
+) -> None:
+    """Statistics say one row, so the planner would re-run a plain IN subquery.
+
+    Each re-run skips the rows this command already updated, so the LIMIT slides
+    forward and bounds nothing. The 21 rows must share a heap page: the planner
+    scales its estimate by page count.
+    """
+    await create_due_notifications(sessions, 1)
+    async with sessions.begin() as session:
+        await session.execute(text("ANALYZE notifications"))
+    await create_due_notifications(sessions, 20)
+
+    claimed = await claim_batch(sessions, 5, LEASE_SECONDS)
+
+    assert len(claimed) == 5
+
+
 async def test_leased_rows_are_invisible(sessions: SessionFactory) -> None:
     await create_due_notifications(sessions, 2)
 
@@ -339,6 +359,31 @@ async def test_stale_dispatcher_cannot_overwrite(sessions: SessionFactory) -> No
     # The dispatcher that holds the current lease can still record its result.
     await record_outcomes(sessions, [Outcome(notification_id, 2, "sent", None, None)])
     assert (await stored(sessions, notification_id)).status == "sent"
+
+
+@pytest.mark.parametrize(
+    ("final_kind", "final_error"), [("sent", None), ("failed", "address rejected")]
+)
+async def test_final_row_is_not_overwritten_with_matching_attempts(
+    sessions: SessionFactory,
+    final_kind: Literal["sent", "failed"],
+    final_error: str | None,
+) -> None:
+    [notification_id] = await create_due_notifications(sessions, 1)
+    await claim_batch(sessions, 10, LEASE_SECONDS)
+    await record_outcomes(
+        sessions, [Outcome(notification_id, 1, final_kind, final_error, None)]
+    )
+    before = await stored(sessions, notification_id)
+
+    # Same `attempts`, so only the status clause of the fence can reject it.
+    late = Outcome(notification_id, 1, "retry", "late result", 60)
+    await record_outcomes(sessions, [late])
+
+    after = await stored(sessions, notification_id)
+    assert after.status == final_kind
+    assert after.last_error == final_error
+    assert after.next_attempt_at == before.next_attempt_at
 
 
 async def test_concurrent_dispatchers_send_once(

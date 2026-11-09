@@ -253,18 +253,19 @@ ON CONFLICT (alert_id, forecast_date, channel) DO NOTHING;
 ### Reserva de un lote para enviar
 
 ```sql
-WITH claimed AS (
+WITH due AS MATERIALIZED (
+  SELECT id
+  FROM notifications
+  WHERE status = 'pending' AND next_attempt_at <= now()
+  ORDER BY next_attempt_at, id
+  LIMIT :batch_size
+  FOR UPDATE SKIP LOCKED
+),
+claimed AS (
   UPDATE notifications
   SET attempts = attempts + 1,
       next_attempt_at = now() + make_interval(secs => :lease_seconds)
-  WHERE id IN (
-    SELECT id
-    FROM notifications
-    WHERE status = 'pending' AND next_attempt_at <= now()
-    ORDER BY next_attempt_at, id
-    LIMIT :batch_size
-    FOR UPDATE SKIP LOCKED
-  )
+  WHERE id IN (SELECT id FROM due)
   RETURNING id, alert_id, forecast_date, channel, probability, threshold, attempts
 )
 SELECT c.*, a.event_type, f.name AS field_name, u.phone, u.email

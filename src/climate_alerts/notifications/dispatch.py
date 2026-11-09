@@ -63,6 +63,11 @@ def build_claim_statement(batch_size: int, lease_seconds: float) -> Select[Any]:
     no transaction has to stay open while sending. If the dispatcher dies, the
     row becomes due again when the lease expires. SKIP LOCKED makes concurrent
     dispatchers take different rows instead of waiting on each other.
+
+    The ids are picked in a MATERIALIZED CTE because that evaluates once. Inside
+    `WHERE id IN (...)` PostgreSQL may re-run the subquery per outer row when
+    statistics are stale, and each re-run skips the rows this command already
+    updated, so LIMIT stops bounding the batch.
     """
     due = (
         select(Notification.id)
@@ -73,10 +78,12 @@ def build_claim_statement(batch_size: int, lease_seconds: float) -> Select[Any]:
         .order_by(Notification.next_attempt_at, Notification.id)
         .limit(batch_size)
         .with_for_update(skip_locked=True)
+        .cte("due")
+        .prefix_with("MATERIALIZED")
     )
     claimed = (
         update(Notification)
-        .where(Notification.id.in_(due))
+        .where(Notification.id.in_(select(due.c.id)))
         .values(
             attempts=Notification.attempts + 1,
             next_attempt_at=func.now() + timedelta(seconds=lease_seconds),
