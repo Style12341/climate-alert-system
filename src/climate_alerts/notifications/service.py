@@ -9,9 +9,9 @@ from climate_alerts.alerts.models import Alert
 from climate_alerts.errors import DeliveryFailure
 from climate_alerts.notifications.models import Notification, NotificationStatus
 
-# Rows written before `DeliveryFailure` existed can hold internal text, such as
-# an exception's class name. Anything that is not one of its messages is
-# returned as the generic one, so stored text never reaches a client.
+# `last_error` is free text in the database. Only the fixed `DeliveryFailure`
+# messages are returned; anything else is replaced by the generic one, so
+# stored text never reaches a client.
 _client_safe_last_error = case(
     (Notification.last_error.is_(None), None),
     (
