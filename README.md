@@ -104,6 +104,8 @@ La carpeta `collection/` recorre el flujo completo con validaciones. Tiene dos a
 - `climate-alerts.postman_collection.json`: la colección.
 - `local.postman_environment.json`: el entorno.
 
+`scripts/smoke_test.sh` ejecuta todo el flujo con un solo comando: levanta el stack, lee los tokens y corre la colección con Newman.
+
 **En Postman:** importar los dos archivos y seleccionar el entorno `Climate Alerts Local`.
 
 **En Bruno:** importar la colección con **Import Collection** y elegir el formato Postman. Luego importar el entorno desde **Environments**, también en formato Postman, y seleccionarlo.
@@ -155,6 +157,7 @@ WHERE id = 123 AND status = 'failed';"
 | `scripts/license_audit.py` | Lista la licencia declarada en PyPI de cada paquete de `uv.lock`. No reemplaza una revisión legal |
 | `scripts/claim_forms.sql` | Compara las formas de la reserva de notificaciones en transacciones que se revierten. Necesita una base vacía y descartable: rechaza correr si la base ya tiene tablas. No mide el drenaje completo. El comando está en su encabezado |
 | `scripts/volume_benchmark.py` | Mide las sentencias reales a 24.000 campos. **Vacía las tablas** de la base que recibe, así que rechaza cualquier host que no sea `localhost` o `127.0.0.1` |
+| `scripts/smoke_test.sh` | Levanta el stack con Compose, espera la primera evaluación y corre la colección con Newman. Deja el stack levantado. No es una prueba de carga ni reinicia la base: si hubo cambios manuales, ejecutar antes `docker compose down -v` |
 
 Los resultados están en las decisiones [3](Decisiones.md#3-job-periódico-apscheduler-3x), [12](Decisiones.md#12-volumen-y-batching) y [14](Decisiones.md#14-estado-de-entrega-next_attempt_at-como-plazo-de-reserva).
 
