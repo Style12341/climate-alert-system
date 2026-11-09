@@ -92,6 +92,9 @@
                 "exec": [
                   "pm.test(\"Status is 401\", function () {",
                   "    pm.response.to.have.status(401);",
+                  "});",
+                  "pm.test(\"Error code is unauthorized\", function () {",
+                  "    pm.expect(pm.response.json().code).to.eql('unauthorized');",
                   "});"
                 ]
               }
@@ -127,6 +130,9 @@
                 "exec": [
                   "pm.test(\"Status is 401\", function () {",
                   "    pm.response.to.have.status(401);",
+                  "});",
+                  "pm.test(\"Error code is invalid_credentials\", function () {",
+                  "    pm.expect(pm.response.json().code).to.eql('invalid_credentials');",
                   "});"
                 ]
               }
@@ -295,6 +301,9 @@
                 "exec": [
                   "pm.test(\"Status is 409\", function () {",
                   "    pm.response.to.have.status(409);",
+                  "});",
+                  "pm.test(\"Error code is alert_already_exists\", function () {",
+                  "    pm.expect(pm.response.json().code).to.eql('alert_already_exists');",
                   "});"
                 ]
               }
@@ -353,6 +362,11 @@
                 "exec": [
                   "pm.test(\"Status is 422\", function () {",
                   "    pm.response.to.have.status(422);",
+                  "});",
+                  "pm.test(\"Error type is unknown_event_type\", function () {",
+                  "    var error = pm.response.json().detail[0];",
+                  "    pm.expect(error.type).to.eql('unknown_event_type');",
+                  "    pm.expect(error.loc).to.eql(['body', 'event_type']);",
                   "});"
                 ]
               }
@@ -574,6 +588,9 @@
                 "exec": [
                   "pm.test(\"Status is 404\", function () {",
                   "    pm.response.to.have.status(404);",
+                  "});",
+                  "pm.test(\"Error code is alert_not_found\", function () {",
+                  "    pm.expect(pm.response.json().code).to.eql('alert_not_found');",
                   "});"
                 ]
               }
@@ -617,6 +634,9 @@
                 "exec": [
                   "pm.test(\"Status is 404\", function () {",
                   "    pm.response.to.have.status(404);",
+                  "});",
+                  "pm.test(\"Error code is field_not_found\", function () {",
+                  "    pm.expect(pm.response.json().code).to.eql('field_not_found');",
                   "});"
                 ]
               }
@@ -1014,6 +1034,9 @@
                 "exec": [
                   "pm.test(\"Status is 404\", function () {",
                   "    pm.response.to.have.status(404);",
+                  "});",
+                  "pm.test(\"Error code is alert_not_found\", function () {",
+                  "    pm.expect(pm.response.json().code).to.eql('alert_not_found');",
                   "});"
                 ]
               }
