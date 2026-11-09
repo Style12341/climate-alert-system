@@ -31,14 +31,6 @@ BUSINESS_ROUTES = sorted(
 )
 
 
-async def test_no_token_returns_401(client: AsyncClient) -> None:
-    response = await client.get(CATALOG)
-
-    assert response.status_code == 401
-    assert response.headers["WWW-Authenticate"] == "Bearer"
-    assert response.json() == {"detail": "Not authenticated", "code": "unauthorized"}
-
-
 @pytest.mark.parametrize(("method", "path"), BUSINESS_ROUTES)
 async def test_business_route_requires_a_token(
     client: AsyncClient, method: str, path: str
@@ -49,7 +41,7 @@ async def test_business_route_requires_a_token(
 
     assert response.status_code == 401
     assert response.headers["WWW-Authenticate"] == "Bearer"
-    assert response.json()["code"] == "unauthorized"
+    assert response.json() == {"detail": "Not authenticated", "code": "unauthorized"}
 
 
 def test_every_business_route_is_collected() -> None:

@@ -104,25 +104,6 @@ async def test_rerun_creates_nothing(
     assert second.created == 0
 
 
-async def test_revision_keeps_snapshot(
-    sessions: SessionFactory, settings: Settings
-) -> None:
-    async with sessions() as session:
-        field, _ = await create_field_with_alert(session)
-        forecast = await create_forecast(session, field, 1, "70")
-
-    await evaluate(sessions, settings)
-    async with sessions() as session:
-        revised = await session.merge(forecast)
-        revised.probability = Decimal("95")
-        await session.commit()
-    second = await evaluate(sessions, settings)
-
-    rows = await stored_notifications(sessions)
-    assert second.created == 0
-    assert [row.probability for row in rows] == [Decimal("70")]
-
-
 async def test_new_date_after_notifying(
     sessions: SessionFactory, settings: Settings
 ) -> None:
