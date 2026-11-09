@@ -36,7 +36,7 @@
 ### Task 1: Project skeleton and settings
 
 **Files:**
-- Create: `pyproject.toml`, `.gitignore`, `.env.example`, `src/climate_alerts/__init__.py`, `src/climate_alerts/config.py`, `src/climate_alerts/logs.py`
+- Create: `pyproject.toml`, `.gitignore`, `src/climate_alerts/__init__.py`, `src/climate_alerts/config.py`, `src/climate_alerts/logs.py`
 - Test: `tests/unit/test_settings.py`, `tests/unit/test_query_style.py`
 
 **Interfaces:**
@@ -375,14 +375,23 @@ Expected: FAIL with `ModuleNotFoundError: climate_alerts.notifications.senders`
 The claim has been executed on PostgreSQL in this form:
 
 ```python
-due = (select(Notification.id)
-       .where(Notification.status == "pending", Notification.next_attempt_at <= func.now())
-       .order_by(Notification.next_attempt_at, Notification.id)
-       .limit(batch_size).with_for_update(skip_locked=True))
-claimed = (update(Notification).where(Notification.id.in_(due))
-           .values(attempts=Notification.attempts + 1,
-                   next_attempt_at=func.now() + timedelta(seconds=lease_seconds))
-           .returning(...).cte("claimed"))
+due = (
+    select(Notification.id)
+    .where(Notification.status == "pending", Notification.next_attempt_at <= func.now())
+    .order_by(Notification.next_attempt_at, Notification.id)
+    .limit(batch_size)
+    .with_for_update(skip_locked=True)
+)
+claimed = (
+    update(Notification)
+    .where(Notification.id.in_(due))
+    .values(
+        attempts=Notification.attempts + 1,
+        next_attempt_at=func.now() + timedelta(seconds=lease_seconds),
+    )
+    .returning(...)
+    .cte("claimed")
+)
 # select(claimed, Alert.event_type, Field.name.label("field_name"), User.phone, User.email)
 #   joined through alerts, fields and users
 ```
@@ -529,7 +538,6 @@ git add -A && git commit -m "feat: add deterministic seed command"
 
 **Files:**
 - Create: `Dockerfile`, `compose.yaml`, `.dockerignore`
-- Modify: `.env.example`
 
 **Interfaces:**
 - Consumes: the entry points in SPEC section 1.
@@ -541,7 +549,7 @@ Multi-stage uv build on `python:3.14-slim`, non-root user, exec-form commands. S
 
 - [ ] **Step 2: Verify the flow on a clean start**
 
-Run: `cp .env.example .env && docker compose down -v && docker compose up -d --build`
+Run: `docker compose down -v && docker compose up -d --build`
 Then, with a token from `docker compose logs seed`: `curl -H "Authorization: Bearer $TOKEN" localhost:8000/api/v1/notifications`
 Expected: `200` with `sent` rows, and a `failed` email row for the user without email.
 

@@ -221,9 +221,10 @@ class Recipient:
     phone: str
     email: str | None
 
+
 @dataclass(frozen=True)
 class OutboundNotification:
-    notification_id: int        # idempotency key for real providers
+    notification_id: int  # idempotency key for real providers
     channel: str
     recipient: Recipient
     field_name: str
@@ -232,8 +233,10 @@ class OutboundNotification:
     probability: Decimal
     threshold: Decimal
 
+
 class NotificationSender(Protocol):
     channel: str
+
     async def send(self, notification: OutboundNotification) -> None: ...
 ```
 
@@ -301,7 +304,7 @@ JSON logs through structlog, with no phone numbers or emails.
 
 ## 14. Container
 
-Multi-stage build with uv on `python:3.14-slim`, running as a non-root user. Compose sets `stop_grace_period: 30s` on the worker and provides development-only values for `JWT_SECRET` and the database password through `.env.example`.
+Multi-stage build with uv on `python:3.14-slim`, running as a non-root user. Compose sets `stop_grace_period: 30s` on the worker and sets clearly labelled development-only values for `JWT_SECRET` and the database password directly in `compose.yaml`, so `docker compose up` needs no setup. The application code still has no default for either.
 
 ## 15. Delivery of the work
 
