@@ -208,10 +208,10 @@ No se integra WhatsApp, como indica el enunciado. El envío queda detrás de una
 
 | Forma | Estadísticas desactualizadas, lote de 5, 21 filas pendientes | 100.000 filas pendientes, estadísticas al día, lote de 500 |
 |-------|-------------------------------------------------------------|------------------------------------------------------------|
-| `UPDATE ... WHERE id IN (subconsulta)` | Reservó 21 | No medido |
-| CTE sin `MATERIALIZED` (no se integra en la consulta por el `FOR UPDATE`) | Reservó 5 | No medido |
-| CTE `MATERIALIZED` y una segunda CTE para el destinatario | Reservó 5 | Hash Semi Join sobre un recorrido completo de la tabla, 23,1 ms |
-| `UPDATE ... FROM alerts, fields, users WHERE id = ANY(ARRAY(subconsulta)) RETURNING ...` | Reservó 5, también con `force_generic_plan` | InitPlan y búsqueda por clave primaria, 6,8 ms |
+| A: `UPDATE ... WHERE id IN (subconsulta)` | Reservó 21 | No medido |
+| B: CTE sin `MATERIALIZED` (no se integra en la consulta por el `FOR UPDATE`) | Reservó 5 | No medido |
+| C: CTE `MATERIALIZED` y una segunda CTE para el destinatario | Reservó 5 | Hash Semi Join sobre un recorrido completo de la tabla, 23,1 ms |
+| E: `UPDATE ... FROM alerts, fields, users WHERE id = ANY(ARRAY(subconsulta)) RETURNING ...` | Reservó 5, también con `force_generic_plan` | InitPlan y búsqueda por clave primaria, 6,8 ms |
 
 Los tiempos son de una corrida sobre un contenedor nuevo. Al volver a ejecutar el script, la cantidad de filas reservadas y los planes se repitieron, pero los tiempos variaron: en tres contenedores nuevos, la CTE tardó entre 10,0 y 23,3 ms y la forma final entre 3,2 y 7,0 ms, siempre alrededor de un tercio del tiempo de la CTE.
 
@@ -291,7 +291,7 @@ Los tamaños de lote salieron de una medición en una máquina concreta, así qu
 - **Autovacuum: corrió** 7 veces sobre `notifications` durante la entrega.
 - **Reserva: correcta.** Ningún lote superó las 500 filas y las 1.152.000 terminaron en `sent`.
 
-**Sin `NOT EXISTS`.** Con `notifications` analizada vacía, que es el estado de un sistema recién desplegado en su primera corrida grande, una variante con `NOT EXISTS` y 4 evaluadores tardó 1.653,8 s, contra 9,9 s de la sentencia con solo `ON CONFLICT`. Sin el anti join el plan no depende de las estadísticas de la tabla, y el test `test_statement_has_no_anti_join` comprueba que el plan no lo contenga.
+**Sin `NOT EXISTS`.** Con `notifications` analizada vacía, que es el estado de un sistema recién desplegado en su primera corrida grande, una variante con `NOT EXISTS` y 4 evaluadores tardó 1.653,8 s. Con 1 evaluador, `NOT EXISTS` tardó 38,0 s, contra 9,9 s de la sentencia con solo `ON CONFLICT`. Sin el anti join el plan no depende de las estadísticas de la tabla, y el test `test_statement_has_no_anti_join` comprueba que el plan no lo contenga.
 
 - **Costo aceptado:** cuando todas las notificaciones ya existen, una corrida tarda 2,74 s en vez de 1,35 s y consume 1.152.000 valores de la secuencia. Con `bigint`, aun en el peor caso cada 5 minutos, la secuencia dura unos 76 millones de años.
 - **`ORDER BY` se mantiene** para que todas las réplicas inserten en el mismo orden. Cero deadlocks en la medición no prueba que omitirlo sea seguro.
@@ -309,7 +309,7 @@ Registrar los resultados de un lote de 500 lleva unos 0,36 s (836,9 s en 2.304 l
 | Límite del proveedor | Enviar 500 | Registrar 500 | Máximo por dispatcher |
 |----------------------|------------|---------------|-----------------------|
 | 80 por segundo | 6,25 s | 0,36 s | Unos 75 por segundo. El registro es el 5 % del ciclo |
-| 1.000 por segundo | 0,5 s | 0,36 s | Unos 570 por segundo. El registro es el 42 % del ciclo |
+| 1.000 por segundo | 0,5 s | 0,36 s | Unos 570 por segundo: la base suma 0,375 s por lote (863 s en 2.304 lotes, reserva y registro), y 500 / (0,5 + 0,375) ≈ 570. El registro es el 42 % del ciclo |
 
 Llegar a 1.000 por segundo no requiere cambiar código. Basta con subir `DISPATCH_CONCURRENCY` (a unos 500 si cada envío tarda 500 ms) y correr una segunda réplica del worker, por ejemplo con `docker compose up --scale worker=2`. Los dispatchers concurrentes están probados: cada notificación se envía una sola vez. Cada réplica también corre la evaluación, que no duplica notificaciones pero repite el trabajo.
 

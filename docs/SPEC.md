@@ -1,8 +1,8 @@
 # Climate Alert System: Technical Specification
 
-> Working document, written before implementation. PRD and SPEC were updated while the system was built; continuous integration was added afterwards as the standard gate for a production repository (see [`operacion.md`](operacion.md#integración-continua)). Where this document and the code differ, the code and [`Decisiones.md`](Decisiones.md) are authoritative.
+> Continuous integration was added after implementation as the standard gate for a production repository (see [`operacion.md`](operacion.md#integración-continua)). Where this document and the code differ, the code and [`Decisiones.md`](Decisiones.md) are authoritative.
 
-**Status:** final · **Date:** 2026-11-08 · **Implements:** [`PRD.md`](PRD.md)
+**Status:** final. Written before implementation and updated while the system was built · **Date:** 2026-11-08 · **Implements:** [`PRD.md`](PRD.md)
 
 This document says how the system is built. The schema and its diagrams are in [`ModeloDeDatos.md`](ModeloDeDatos.md). The reasoning behind each choice is in [`Decisiones.md`](Decisiones.md). Neither is repeated here.
 

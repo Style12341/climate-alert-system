@@ -1,8 +1,8 @@
 # Climate Alert System: Product Requirements
 
-> Working document, written before implementation. PRD and SPEC were updated while the system was built; continuous integration was added afterwards as the standard gate for a production repository (see [`operacion.md`](operacion.md#integración-continua)). Where this document and the code differ, the code and [`Decisiones.md`](Decisiones.md) are authoritative.
+> Continuous integration was added after implementation as the standard gate for a production repository (see [`operacion.md`](operacion.md#integración-continua)). Where this document and the code differ, the code and [`Decisiones.md`](Decisiones.md) are authoritative.
 
-**Status:** final · **Date:** 2026-11-08 · **Source of truth:** [`statement.md`](../statement.md)
+**Status:** final. Written before implementation and updated while the system was built · **Date:** 2026-11-08 · **Source of truth:** [`statement.md`](../statement.md)
 
 Producers configure alerts on their fields, choosing a climate event and a probability threshold. A background job compares stored forecasts against those thresholds, and the system notifies the owner when one is reached. The system must be small, production grade, and honest about what it leaves out.
 
