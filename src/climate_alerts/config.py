@@ -38,9 +38,6 @@ class Settings(BaseSettings):
     dispatch_backoff_base_seconds: PositiveSeconds = 60
     dispatch_backoff_cap_seconds: PositiveSeconds = 3600
 
-    default_page_size: PositiveCount = 50
-    max_page_size: PositiveCount = 200
-
     db_pool_size: PositiveCount = 5
     # Zero is a real choice here: no connections beyond the pool.
     db_max_overflow: Annotated[int, Field(ge=0)] = 5
@@ -56,12 +53,6 @@ class Settings(BaseSettings):
         if not _parse_channels(value):
             raise ValueError("NOTIFICATION_CHANNELS must name at least one channel")
         return value
-
-    @model_validator(mode="after")
-    def _check_page_sizes(self) -> Self:
-        if self.default_page_size > self.max_page_size:
-            raise ValueError("default_page_size must not exceed max_page_size")
-        return self
 
     @model_validator(mode="after")
     def _check_lease_outlasts_a_batch(self) -> Self:
