@@ -65,6 +65,8 @@ La decisión de asociar los pronósticos a `field_id` se mantuvo, pero cambió s
 
 **La medición final no repitió un número.** Volví a medir con el código real. La evaluación coincidió con lo esperado, pero la entrega tardó 917 s en lugar de 34 a 40 s. Después de cambiar la reserva volví a medir, esta vez separando los dos pasos: 8,71 s de evaluación y 863 s de entrega, de los que 24,0 s fueron la reserva y 836,9 s el registro de resultados. El benchmark inicial registraba cada lote con un solo `UPDATE`, y el código final lo hace fila por fila. La velocidad sigue siendo muy superior al límite del proveedor, así que lo dejé como está y lo registré en [Decisiones.md](Decisiones.md#12-volumen-y-batching).
 
+**Lo que encontró la integración continua.** La primera ejecución local encontró 7 vulnerabilidades HIGH con corrección en la imagen base, ninguna en las dependencias de la aplicación: zlib1g, y msgpack, setuptools y urllib3 incluidos dentro de pip. Actualicé los paquetes de Debian en la imagen y eliminé pip. La revisión de seguridad encontró además que el escaneo de ZAP, tal como estaba escrito, nunca podía fallar: usaba `-I` y no tenía archivo de reglas. Quité `-I`, agregué `.zap/rules.tsv` y comprobé ambos casos: sin el archivo, el escaneo falla por las dos alertas WARN; con él, esas dos se ignoran y cualquier otra alerta hace fallar el trabajo.
+
 ## Estado final
 
 - [x] Cerrar volumen y batching con mediciones.
