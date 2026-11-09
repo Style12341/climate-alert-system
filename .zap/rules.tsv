@@ -3,4 +3,4 @@
 # Any alert not set to IGNORE here fails the build.
 10021	IGNORE	(X-Content-Type-Options Header Missing)	The API serves only JSON, which browsers do not MIME-sniff into script or HTML.
 90004	IGNORE	(Cross-Origin-Resource-Policy Header Missing or Invalid)	A bearer-token JSON API is not embedded as a cross-origin resource, so CORP adds nothing.
-10106	IGNORE	(HTTP Only Site)	CI scans the plain-HTTP local Compose stack; TLS is terminated by the proxy in front of the API in production.
+10106	IGNORE	(HTTP Only Site)	CI scans the plain-HTTP local Compose stack. TLS is out of scope for this project (docs/Decisiones.md, Simplificaciones frente a producción); a deployment terminates TLS in front of the API.
