@@ -19,7 +19,7 @@ Solo hace falta Docker con Compose. No hay nada que configurar.
 docker compose up --build
 ```
 
-Compose levanta PostgreSQL, aplica las migraciones, carga los datos simulados y arranca la API y el worker. La API queda en <http://localhost:8000>.
+Compose levanta PostgreSQL, aplica las migraciones, carga los datos simulados y arranca la API y el worker. La API queda en <http://localhost:8000>. El puerto se publica solo en `127.0.0.1`, porque el `JWT_SECRET` de `compose.yaml` es público.
 
 `JWT_SECRET` y la contraseña de la base que aparecen en `compose.yaml` son solo para desarrollo. Son públicos: no se deben usar en ningún despliegue real. La aplicación no define un valor por defecto para ninguno de los dos.
 
@@ -52,6 +52,10 @@ Los tokens duran 24 horas. Para generar otros, ejecutar `docker compose run --rm
 3. Probar `GET /api/v1/alerts` y `GET /api/v1/notifications`.
 
 La primera evaluación corre unos segundos después del arranque. Si la lista de notificaciones está vacía, conviene esperar y repetir.
+
+Compose habilita los dos canales de demostración, así que es esperable una fila `email` en `failed` para el usuario sin email.
+
+Los decimales se devuelven como texto, por ejemplo `"70.00"`.
 
 ## Usar la colección
 
@@ -146,9 +150,9 @@ El razonamiento completo, las alternativas descartadas y los casos borde están 
 Lo que el enunciado pedía está hecho. Esto es lo que quedó sin hacer o sin probar:
 
 - **Envío e ingesta reales.** Los dos son simulados: el enunciado excluye WhatsApp y pide mockear los datos.
-- **Carga sostenida.** El benchmark es una sola corrida en una máquina, con el envío simulado. No se midió el comportamiento de autovacuum con la cola funcionando durante horas.
+- **Carga sostenida.** El benchmark es una sola corrida en una máquina, sin envío. No se midió el comportamiento de autovacuum con la cola funcionando durante horas.
 - **Registro de envíos por lote.** El dispatcher registra cada resultado con un `UPDATE` propio. Drenar 1.152.000 notificaciones tardó 917 s, unas 1.256 por segundo. Supera el límite de 80 mensajes por segundo del proveedor, por lo que no se optimizó.
-- **Hardware de producción.** Los números salen de PostgreSQL sin ajustes en un equipo de escritorio.
+- **Hardware de producción.** Los números salen de PostgreSQL sin ajustes en una notebook.
 - **Supuestos sin datos reales.** Las 3 alertas por campo son una estimación.
 - **Bruno.** La importación se comprobó con su convertidor oficial, pero no se ejecutó la colección dentro de la aplicación. En Postman se usó Newman, que es su ejecutor de línea de comandos.
 - **Reprocesar desde la API.** Reencolar una notificación fallida requiere el `UPDATE` de esta página.

@@ -29,6 +29,7 @@ Este documento explica qué se decidió, por qué, qué se descartó y qué lím
 | 21 | Canales de notificación | Una fila por canal y un sender por canal | Cerrada |
 | 22 | Colección para pruebas manuales | Postman Collection v2.1, importable en Bruno | Cerrada |
 | 23 | Construcción de consultas | Lenguaje de expresiones de SQLAlchemy 2.0 | Cerrada |
+| 24 | Logs y salud | structlog con salida JSON, y endpoints `/health/live` y `/health/ready` | Cerrada |
 
 El detalle de cada tabla y sus diagramas están en [ModeloDeDatos.md](ModeloDeDatos.md).
 
@@ -135,7 +136,7 @@ Ninguna cambia la elección. PgQueuer y Procrastinate son las alternativas técn
 | Copyleft en ejecución | 0 |
 | Copyleft solo en desarrollo | 2: `certifi` y `pathspec`, ambos MPL-2.0 |
 
-MPL-2.0 es un copyleft débil, por archivo: las obligaciones alcanzan a los archivos de esos paquetes si se modifican y se distribuyen. Aquí no se modifican ni se distribuyen. `certifi` llega por `httpx` y `requests`, y `pathspec` por `mypy`. La imagen se construye con `uv sync --no-dev`, así que ninguno de los dos se incluye. Esto se basa en metadata declarada por cada autor: no es una revisión legal.
+MPL-2.0 es un copyleft débil, por archivo: las obligaciones alcanzan a los archivos de esos paquetes si se distribuyen. Aquí no se modifican ni se distribuyen. `certifi` llega por `httpx`, `httpcore` y `requests`, y `pathspec` por `mypy`. La imagen se construye con `uv sync --no-dev`, así que ninguno de los dos se incluye. Esto se basa en metadata declarada por cada autor: no es una revisión legal.
 
 ## 4. Datos climáticos: una fila por campo, día y evento
 
@@ -254,7 +255,7 @@ No se integra WhatsApp, como indica el enunciado. El envío queda detrás de una
 
 **Dato de contexto:** Meta documenta 80 mensajes por segundo por número como valor por defecto, y responde con el error `130429` al excederlo. A ese ritmo, 21.600 notificaciones tardarían 4,5 minutos, y el peor caso, 4 horas.
 
-**Medición inicial:** benchmark descartable a 24.000 campos, con PostgreSQL 17 sin ajustes, 28 núcleos, 31 GiB de memoria y envío simulado.
+**Medición inicial:** benchmark descartable a 24.000 campos, con PostgreSQL 17 sin ajustes, 28 CPU lógicas, 31 GiB de memoria y envío simulado.
 
 | Escenario | Tiempo | WAL | Memoria del cliente |
 |-----------|--------|-----|---------------------|
@@ -311,8 +312,8 @@ La base no es el cuello de botella. La medición inicial procesó entre 28.900 y
 - **Evaluación: coincide.** 9,82 s contra 10,0 s, y 463 MiB de WAL contra 443 MiB. La sentencia final se comporta como la medida.
 - **Entrega: es unas 25 veces más lenta.** 917 s contra 34 a 40 s, es decir, 1.256 filas por segundo. El benchmark inicial marcaba cada lote como enviado con un único `UPDATE`. El código final, en `record_outcomes`, ejecuta un `UPDATE` por fila, porque cada una lleva su propio control de `attempts`. Es la causa más probable, aunque no se midió por separado. Sigue por encima del límite del proveedor, así que se acepta.
 - **Memoria: no es comparable en valor absoluto.** 83 MiB contra 36 MiB, porque este proceso también carga Alembic y el ORM. Lo relevante se mantiene: el peor caso sumó 0,4 MiB sobre la carga inicial.
-- **Autovacuum: esta vez corrió.** 8 veces sobre `notifications` durante la entrega. Al terminar había 181.500 tuplas muertas y la tabla ocupaba 330 MB.
-- **Reserva: correcta.** Ningún lote superó las 500 filas, las 1.152.000 terminaron en `sent` y todas con `attempts = 1`.
+- **Autovacuum: esta vez corrió.** 8 veces sobre `notifications` durante la entrega.
+- **Reserva: correcta.** Ningún lote superó las 500 filas y las 1.152.000 terminaron en `sent`.
 
 **Qué significa "no perder notificaciones":**
 
@@ -412,7 +413,7 @@ Los intervalos, reintentos y plazos de reserva están en la [especificación](do
 - `HTTPBearer` de FastAPI, y toda la identidad resuelta en una sola dependencia.
 - El algoritmo se fija por configuración y nunca se toma del encabezado del token, como indica [RFC 8725](https://www.rfc-editor.org/rfc/rfc8725.html).
 - `sub` y `exp` son obligatorios. Cualquier otro caso responde `401`.
-- El secreto debe tener al menos 256 bits y no puede ser una contraseña memorizable.
+- El secreto debe tener al menos 32 caracteres.
 
 PyJWT 2.15 tiene licencia MIT y no agrega dependencias obligatorias en la versión de Python usada.
 
@@ -476,7 +477,7 @@ Usuarios y campos no tienen endpoints propios porque pertenecen a Agrobot.
 
 **Direcciones:** se resuelven con columnas de `users`: `phone` para WhatsApp y un `email` opcional. Si falta la dirección de un canal, la fila termina como `failed` con el motivo, y queda visible.
 
-**Se tuvo en cuenta a propósito:** el enunciado solo pide notificar al usuario. Modelar los canales cuesta una columna y evita un cambio caro más adelante, por eso se incorporó. Lo que un producto multicanal real necesitaría está en las simplificaciones.
+**Se tuvo en cuenta a propósito:** el enunciado solo pide notificar al usuario. Modelar los canales tiene un costo real: la columna `channel`, el cruce con los canales en la evaluación, el registro de senders, el segundo sender simulado y `users.email`. A cambio evita un cambio caro más adelante, por eso se incorporó. Lo que un producto multicanal real necesitaría está en las simplificaciones.
 
 ## 22. Colección para pruebas manuales
 
@@ -502,6 +503,22 @@ Usuarios y campos no tienen endpoints propios porque pertenecen a Agrobot.
 | API `session.query()` y estilo 1.x | SQLAlchemy la considera [heredada](https://docs.sqlalchemy.org/en/21/changelog/migration_20.html) |
 
 **Cómo se hace cumplir:** [Ruff](https://docs.astral.sh/ruff/rules/banned-api/) prohíbe importar `text()` y `Query` en el código de la aplicación, un test rechaza las llamadas a `.query(`, y los tests fallan ante cualquier advertencia de obsolescencia. Migraciones y tests pueden usar `text()`.
+
+## 24. Logs estructurados y endpoints de salud
+
+**Decisión:** los logs salen en JSON a través de [structlog](https://www.structlog.org/), incluidos los de APScheduler y uvicorn. La API expone `/health/live` y `/health/ready`, sin autenticación.
+
+**Por qué:** el enunciado permite otras herramientas "si se justifica la elección", y ninguna de las dos cosas estaba en su stack.
+
+- **structlog.** El worker no tiene interfaz, así que se opera leyendo sus logs. Hace falta filtrar por campos como `failed` o `duration_ms`, y evitar mezclar teléfonos o emails con texto libre. Tiene licencia MIT o Apache-2.0.
+- **Salud.** `/health/live` indica que el proceso responde. `/health/ready` consulta la base y responde `503` si no está disponible, y es lo que usa el `healthcheck` de Compose. Sin ellos no hay forma de distinguir un proceso vivo de uno que no llega a la base.
+
+**Alternativas descartadas:**
+
+| Alternativa | Por qué no |
+|-------------|------------|
+| `logging` de la biblioteca estándar con un formateador JSON propio | Es posible, pero obliga a escribir y probar ese formateador, y a bajar los campos a mano en cada evento |
+| Un solo endpoint de salud | Mezcla dos preguntas: un reinicio no arregla una base caída |
 
 ---
 
@@ -545,8 +562,9 @@ El objetivo es un sistema simple, sin construir todo lo que rodea a un producto 
 | Ingesta simulada | Integración con un proveedor real, normalizando escalas y derivando heladas | El enunciado pide mockear estos datos | Decisión 4 |
 | Envío simulado | WhatsApp Cloud API con [plantillas aprobadas](https://developers.facebook.com/documentation/business-messaging/whatsapp/templates/overview), opt-in y manejo del error `130429` | El enunciado excluye la integración | [Throughput](https://developers.facebook.com/documentation/business-messaging/whatsapp/throughput/) |
 | Tokens generados por un script | El emisor real de Agrobot | El enunciado no pide login | Decisión 18 |
-| Secreto compartido (HS256) | Firma asimétrica y JWKS: la API solo tendría la clave pública y no podría emitir tokens | Hay un solo servicio y ningún emisor real. Se exige un secreto de 256 bits | [Auth0](https://auth0.com/docs/get-started/applications/signing-algorithms) |
-| Tokens sin revocación | Lista de revocación o tokens de vida muy corta con renovación | Se limita la exposición con una expiración corta | [RFC 8725](https://www.rfc-editor.org/rfc/rfc8725.html) |
+| Secreto compartido (HS256) | Firma asimétrica y JWKS: la API solo tendría la clave pública y no podría emitir tokens | Hay un solo servicio y ningún emisor real. Se exige un secreto de al menos 32 caracteres | [Auth0](https://auth0.com/docs/get-started/applications/signing-algorithms) |
+| Tokens sin revocación | Lista de revocación, o tokens de vida corta con renovación emitidos por un emisor real | Los tokens de demostración duran 24 horas para comodidad de quien revisa | [RFC 8725](https://www.rfc-editor.org/rfc/rfc8725.html) |
+| `iss` y `aud` del JWT sin validar | Exigir y validar emisor y audiencia, y configurar los valores esperados con el emisor real | Hay un solo servicio y ningún emisor real | [RFC 8725](https://www.rfc-editor.org/rfc/rfc8725.html) |
 | Sin límite de pedidos en la API | Límite por cliente, en la aplicación o en el gateway | No hay tráfico real. Sí se limita el tamaño de página | [OWASP API4:2023](https://owasp.org/API-Security/editions/2023/en/0xa4-unrestricted-resource-consumption/) |
 | Identificadores `bigint` en la API | Identificadores no predecibles | La pertenencia se verifica en cada consulta, que es la protección real | [OWASP API1:2023](https://owasp.org/API-Security/editions/2023/en/0xa1-broken-object-level-authorization/) |
 | Logs estructurados, sin métricas | Métricas y alertas de latencia, tráfico, errores y saturación, además de filas pendientes y fallidas | El ejercicio no incluye una plataforma de monitoreo | [Google SRE](https://sre.google/sre-book/monitoring-distributed-systems/) |
@@ -586,6 +604,8 @@ El objetivo es un sistema simple, sin construir todo lo que rodea a un producto 
 | El usuario no tiene dirección para un canal | Esa fila termina como `failed`, con el motivo |
 | Se habilita un canal nuevo | Notifica por ese canal las fechas futuras que sigan superando el umbral |
 | El worker está caído hasta que pasa la fecha del pronóstico | Ese día ya no se evalúa, porque solo se consideran fechas futuras o la actual |
+| Tras una caída larga queda una notificación pendiente cuya fecha ya pasó | Se entrega igual: la fecha se compara al crear la notificación, no al enviarla |
+| Una fila tiene un canal sin sender registrado, por ejemplo una réplica a mitad de un despliegue | Sigue los mismos reintentos que un error transitorio, y termina como `failed` solo al llegar al máximo de intentos |
 
 ## Fuera de alcance
 

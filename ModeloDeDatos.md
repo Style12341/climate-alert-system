@@ -175,26 +175,26 @@ La zona se valida al escribir porque un valor inválido haría fallar la evaluac
 
 | Columna | Tipo | Regla |
 |---------|------|-------|
-| `field_id` | `BIGINT` | Parte de la clave. FK a `fields` |
+| `field_id` | `BIGINT` | Parte de la clave. FK a `fields` con `ON DELETE CASCADE` |
 | `forecast_date` | `DATE` | Parte de la clave. Fecha local del campo |
 | `event_type` | `TEXT` | Parte de la clave. FK al catálogo |
 | `probability` | `NUMERIC(5,2)` | Entre 0 y 100 |
 | `fetched_at` | `TIMESTAMPTZ` | Momento en que la ingesta guardó el dato |
 
-La ingesta actualiza la fila existente. No se conserva historial de pronósticos.
+La ingesta actualiza la fila existente. No se conserva historial de pronósticos. Por eso borrar un campo borra sus pronósticos: son datos derivados que la ingesta puede volver a traer, a diferencia de las alertas, que están protegidas con `ON DELETE RESTRICT`.
 
 ### `alerts`
 
 | Columna | Tipo | Regla |
 |---------|------|-------|
 | `id` | `BIGINT` identity | Clave primaria |
-| `field_id` | `BIGINT` | FK a `fields` |
+| `field_id` | `BIGINT` | FK a `fields`. Indexada con `ix_alerts_field_id` |
 | `event_type` | `TEXT` | FK al catálogo |
 | `threshold` | `NUMERIC(5,2)` | Mayor que 0 y hasta 100 |
 | `created_at`, `updated_at` | `TIMESTAMPTZ` | Por defecto, `now()` |
 | `deleted_at` | `TIMESTAMPTZ` | `NULL` mientras la alerta esté vigente |
 
-El dueño se obtiene a través del campo. Solo puede haber una alerta vigente por campo y evento.
+El dueño se obtiene a través del campo. Solo puede haber una alerta vigente por campo y evento. `ix_alerts_field_id` es un índice común, sin filtro, porque el historial de notificaciones incluye las alertas borradas y el índice único parcial no las cubre.
 
 ### `notifications`
 
@@ -265,7 +265,7 @@ WITH due AS MATERIALIZED (
 claimed AS (
   UPDATE notifications
   SET attempts = attempts + 1,
-      next_attempt_at = now() + make_interval(secs => :lease_seconds)
+      next_attempt_at = now() + :lease_interval
   WHERE id IN (SELECT id FROM due)
   RETURNING id, alert_id, forecast_date, channel, probability, threshold, attempts
 )

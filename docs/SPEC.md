@@ -1,6 +1,6 @@
 # Climate Alert System: Technical Specification
 
-**Status:** draft for review · **Date:** 2026-11-08 · **Implements:** [`PRD.md`](PRD.md)
+**Status:** final · **Date:** 2026-11-08 · **Implements:** [`PRD.md`](PRD.md)
 
 This document says how the system is built. The schema and its diagrams are in [`ModeloDeDatos.md`](../ModeloDeDatos.md). The reasoning behind each choice is in [`Decisiones.md`](../Decisiones.md). Neither is repeated here.
 
@@ -46,15 +46,18 @@ src/climate_alerts/
   worker.py              Scheduler, signals, shutdown
   api/
     app.py               create_app, lifespan, routers
-    dependencies.py      Session and current user dependencies
+    dependencies.py      Session, current user, shared request types
+    schemas.py           ErrorOut and the declared error responses
     health.py            Liveness and readiness
   agrobot/               Mock of the pre-existing system
     models.py            User, Field, ClimateEventType, WeatherForecast
+    router.py  schemas.py  service.py  Event type catalog
+    tokens.py            Token issuing, standing in for the real login system
     seed.py              One-shot seed command
   alerts/
     models.py  schemas.py  service.py  router.py
   notifications/
-    models.py  schemas.py  router.py
+    models.py  schemas.py  service.py  router.py
     evaluation.py        Evaluation statement and chunk loop
     dispatch.py          Claim, send, record outcomes
     senders.py           Sender protocol, simulated senders, registry
@@ -79,7 +82,7 @@ tests/
 
 | Variable | Default | Why |
 |----------|---------|-----|
-| `JWT_ALGORITHM` | `HS256` | Pinned by configuration |
+| `JWT_ALGORITHM` | `HS256` | Pinned by configuration. One of `HS256`, `HS384` or `HS512` |
 | `EVALUATION_INTERVAL_SECONDS` | 300 | The measured worst case takes about 11 s |
 | `EVALUATION_CHUNK_SIZE` | 5000 | Benchmark |
 | `NOTIFICATION_CHANNELS` | `whatsapp` | Comma-separated. Keeps measured volumes valid |
@@ -93,11 +96,12 @@ tests/
 | `DISPATCH_BACKOFF_CAP_SECONDS` | 3600 | |
 | `DEFAULT_PAGE_SIZE`, `MAX_PAGE_SIZE` | 50, 200 | |
 | `DB_POOL_SIZE`, `DB_MAX_OVERFLOW` | 5, 5 | |
+| `DB_COMMAND_TIMEOUT_SECONDS` | 60 | Without it, a query on a vanished host never returns, and `max_instances=1` then skips every later run |
 | `WORKER_SHUTDOWN_TIMEOUT_SECONDS` | 25 | Below Compose's `stop_grace_period: 30s` |
 | `SEED_TOKEN_TTL_HOURS` | 24 | Reviewer convenience. Production tokens would be short-lived |
-| `LOG_LEVEL` | `INFO` | |
+| `LOG_LEVEL` | `INFO` | One of `CRITICAL`, `ERROR`, `WARNING`, `INFO` or `DEBUG` |
 
-Startup also validates that every enabled channel has a registered sender.
+Startup also validates that every enabled channel has a registered sender. Counts, sizes, timeouts and intervals must be positive (`DB_MAX_OVERFLOW` may be 0), `DEFAULT_PAGE_SIZE` may not exceed `MAX_PAGE_SIZE`, and `DISPATCH_LEASE_SECONDS` must exceed `DISPATCH_BATCH_SIZE / DISPATCH_CONCURRENCY × DISPATCH_SEND_TIMEOUT_SECONDS`.
 
 ## 5. Data layer
 
@@ -137,11 +141,11 @@ CurrentUserId = Annotated[int, Depends(get_current_user_id)]
 jwt.decode(token, secret, algorithms=[algorithm], options={"require": ["exp", "sub"]})
 ```
 
-`sub` is a string in the JWT and must parse to a positive integer. Any `InvalidTokenError` or unparseable `sub` returns `401` with `WWW-Authenticate: Bearer`. The dependency does not query the database: a valid token for a user with no data simply sees nothing.
+`sub` is a string in the JWT and must match `[1-9][0-9]*` and fit a `BIGINT`. Any `InvalidTokenError` or unparseable `sub` returns `401` with `WWW-Authenticate: Bearer`. The dependency does not query the database: a valid token for a user with no data simply sees nothing.
 
 ## 7. API
 
-Errors use FastAPI's default `{"detail": ...}` format. Business routes are under `/api/v1` and require a token.
+Errors use FastAPI's default `{"detail": ...}` format. A validation error is a `422` whose `detail` is a list of objects containing `type`, `loc` and `msg`, including the checks made at runtime (an unknown event, `limit` above the maximum). Other errors carry a string `detail` and are declared in the OpenAPI document as `ErrorOut`. Business routes are under `/api/v1` and require a token.
 
 | Method and path | Success | Errors |
 |-----------------|---------|--------|
@@ -201,6 +205,7 @@ while not stopping:
 | `PermanentDeliveryError` | `status = 'failed'`, `last_error` set |
 | Other error or timeout, attempts below the maximum | `next_attempt_at = now() + delay`, `last_error` set |
 | Other error or timeout, attempts at the maximum | `status = 'failed'`, `last_error` set |
+| No sender registered for the channel | Same as other error, with the same `last_error` |
 | Claimed with attempts above the maximum | `status = 'failed'` without sending. Earlier leases expired without a result |
 
 ```text
@@ -275,6 +280,7 @@ Tests run on real PostgreSQL 17 through `testcontainers`. pytest-asyncio uses `a
 | Migrations | Upgrade from empty, `alembic check`, downgrade to empty, upgrade again |
 | Constraints | Each rule in `ModeloDeDatos.md`, including the ones autogenerate can't see |
 | Seed | Idempotent: running twice leaves the same users, fields and alerts |
+| End to end | Seed, evaluation, dispatch with the simulated senders, then the API history |
 
 **Outside the test suite, run once and recorded in `Decisiones.md`:** the volume benchmark on the final statements at 24,000 farms, and the full-dependency license audit.
 
@@ -294,7 +300,7 @@ Upserts use natural keys: `users.phone`, the owner and name of a field, the aler
 
 ## 13. Observability
 
-JSON logs through structlog, with no phone numbers or emails.
+JSON logs through structlog, with no phone numbers or emails. Standard library loggers, including `uvicorn*` and `apscheduler`, go through the same pipeline. `apscheduler` is limited to warnings, because at `INFO` it writes two lines per job per interval.
 
 | Event | Fields |
 |-------|--------|
@@ -304,7 +310,7 @@ JSON logs through structlog, with no phone numbers or emails.
 
 ## 14. Container
 
-Multi-stage build with uv on `python:3.14-slim`, running as a non-root user. Compose sets `stop_grace_period: 30s` on the worker and sets clearly labelled development-only values for `JWT_SECRET` and the database password directly in `compose.yaml`, so `docker compose up` needs no setup. The application code still has no default for either.
+Multi-stage build with uv on `python:3.14-slim`, running as a non-root user. Compose sets `stop_grace_period: 30s` on the worker, `restart: unless-stopped` on `api` and `worker`, a healthcheck on `api` through `/health/ready`, publishes the API on `127.0.0.1` only because `JWT_SECRET` in that file is public, and sets clearly labelled development-only values for `JWT_SECRET` and the database password directly in `compose.yaml`, so `docker compose up` needs no setup. The application code still has no default for either.
 
 ## 15. Delivery of the work
 
@@ -342,7 +348,7 @@ Verification: Newman runs the collection against a clean `docker compose up`, an
 | FR-1 to FR-7 | `alerts/`, `agrobot/models.py` | API tests |
 | FR-8 to FR-12, FR-26 | `notifications/evaluation.py`, `worker.py` | Evaluation tests, plan regression |
 | FR-13 to FR-17, FR-27, FR-28 | `notifications/dispatch.py`, `senders.py` | Dispatch tests, crash recovery |
-| FR-18 | `notifications/router.py` | API tests |
+| FR-18 | `notifications/router.py`, `notifications/service.py` | API tests |
 | FR-19, FR-20 | `auth.py`, every router | API tests |
 | FR-21 | `api/health.py` | API tests |
 | FR-22 to FR-24 | `agrobot/seed.py` | Seed tests |
