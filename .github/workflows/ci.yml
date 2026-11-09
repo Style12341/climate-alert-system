@@ -75,8 +75,9 @@ jobs:
           persist-credentials: false
       # The gitleaks container, not gitleaks-action: the action needs a license
       # key for repositories owned by an organization.
+      # Pinned by digest and bumped by hand: Dependabot does not see images in `run:`.
       - name: gitleaks over the full history
-        run: docker run --rm -v "$GITHUB_WORKSPACE:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 git --redact --verbose /repo
+        run: docker run --rm -v "$GITHUB_WORKSPACE:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f git --redact --verbose /repo
 
   container:
     runs-on: ubuntu-latest
@@ -122,13 +123,15 @@ jobs:
           test -n "$token"
           echo "::add-mask::$token"
           echo "ZAP_AUTH_HEADER_VALUE=Bearer $token" >> "$GITHUB_ENV"
-      # -I: WARN alerts do not fail the job, only FAIL alerts do.
+      # Any alert not set to IGNORE in .zap/rules.tsv fails the job (ZAP exits 1 or 2).
       - name: ZAP API scan
         uses: zaproxy/action-api-scan@5158fe4d9d8fcc75ea204db81317cce7f9e5453d # v0.10.0
         with:
+          # Pinned by digest and bumped by hand: Dependabot does not see action inputs.
+          docker_name: ghcr.io/zaproxy/zaproxy:2.17.0@sha256:9624669db72f54d86c4b46a7064518bd9bf79d8c61a4c31befa9923489f328af
           target: http://localhost:8000/openapi.json
           format: openapi
-          cmd_options: -I
+          rules_file_name: .zap/rules.tsv
           fail_action: true
           allow_issue_writing: false
           artifact_name: zap-api-scan
@@ -139,6 +142,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
+      # actions: read is required by CodeQL on private repositories.
+      actions: read
       contents: read
       security-events: write
     steps:
