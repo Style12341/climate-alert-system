@@ -15,6 +15,7 @@ from climate_alerts.agrobot.models import Field, User
 from climate_alerts.alerts.models import Alert
 from climate_alerts.config import Settings
 from climate_alerts.db import SessionFactory
+from climate_alerts.errors import DeliveryFailure
 from climate_alerts.notifications.models import Notification, NotificationStatus
 from climate_alerts.notifications.senders import (
     NotificationSender,
@@ -22,8 +23,6 @@ from climate_alerts.notifications.senders import (
     PermanentDeliveryError,
     Recipient,
 )
-
-MAX_ERROR_LENGTH = 500
 
 logger = structlog.get_logger()
 
@@ -41,7 +40,7 @@ class Outcome:
     notification_id: int
     attempts: int
     kind: Literal["sent", "retry", "failed"]
-    error: str | None
+    error: DeliveryFailure | None
     delay_seconds: float | None
 
 
@@ -153,19 +152,22 @@ async def deliver(
 ) -> Outcome:
     """Send one notification and classify the result. Never raises an `Exception`.
 
-    `last_error` must hold only messages we control, so an unexpected error is
-    reduced to its type: its text could carry provider details or an address.
+    The outcome carries only a `DeliveryFailure`, which the API shows. The
+    internal cause is logged with its type only: its message could carry
+    provider details or an address.
     """
     notification = claimed.notification
 
-    def failed(reason: str) -> Outcome:
+    def failed(reason: DeliveryFailure, exc: Exception | None = None) -> Outcome:
+        _log_send_failed(notification, reason, exc)
         return Outcome(
             notification.notification_id, claimed.attempts, "failed", reason, None
         )
 
-    def retry_or_fail(reason: str) -> Outcome:
+    def retry_or_fail(reason: DeliveryFailure, exc: Exception | None = None) -> Outcome:
         if claimed.attempts >= settings.dispatch_max_attempts:
-            return failed(reason)
+            return failed(reason, exc)
+        _log_send_failed(notification, reason, exc)
         delay = backoff_seconds(
             claimed.attempts,
             settings.dispatch_backoff_base_seconds,
@@ -178,24 +180,40 @@ async def deliver(
 
     # Attempts count claims, so a dispatcher that died mid-send used one up.
     if claimed.attempts > settings.dispatch_max_attempts:
-        return failed("attempts exhausted: earlier leases expired without a result")
+        return failed(DeliveryFailure.ATTEMPTS_EXHAUSTED)
 
     sender = senders.get(notification.channel)
     if sender is None:
         # Transient on purpose: a replica mid-rollout may not know a channel
         # yet, and that must not permanently fail a deliverable notification.
-        return retry_or_fail(f"no sender registered for channel {notification.channel}")
+        return retry_or_fail(DeliveryFailure.CHANNEL_UNAVAILABLE)
 
     try:
         async with asyncio.timeout(settings.dispatch_send_timeout_seconds):
             await sender.send(notification)
     except PermanentDeliveryError as exc:
-        return failed(str(exc))
-    except TimeoutError:
-        return retry_or_fail("send timed out")
+        return failed(exc.failure, exc)
+    except TimeoutError as exc:
+        return retry_or_fail(DeliveryFailure.TIMED_OUT, exc)
     except Exception as exc:
-        return retry_or_fail(f"send failed: {type(exc).__name__}")
+        return retry_or_fail(DeliveryFailure.FAILED, exc)
     return Outcome(notification.notification_id, claimed.attempts, "sent", None, None)
+
+
+def _log_send_failed(
+    notification: OutboundNotification,
+    reason: DeliveryFailure,
+    exc: Exception | None,
+) -> None:
+    """The internal side of a failed attempt: never the exception's message."""
+    context = {"error_type": type(exc).__name__} if exc is not None else {}
+    logger.warning(
+        "dispatch.send_failed",
+        notification_id=notification.notification_id,
+        channel=notification.channel,
+        reason=reason.code,
+        **context,
+    )
 
 
 def _outcome_values(outcome: Outcome) -> dict[str, Any]:
@@ -205,7 +223,7 @@ def _outcome_values(outcome: Outcome) -> dict[str, Any]:
             "sent_at": func.now(),
             "last_error": None,
         }
-    error = (outcome.error or "")[:MAX_ERROR_LENGTH]
+    error = outcome.error.message if outcome.error is not None else None
     if outcome.kind == "failed":
         return {"status": NotificationStatus.FAILED.value, "last_error": error}
     delay = timedelta(seconds=outcome.delay_seconds or 0)

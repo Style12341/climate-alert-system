@@ -6,6 +6,8 @@ from typing import Protocol
 
 import structlog
 
+from climate_alerts.errors import DeliveryFailure
+
 logger = structlog.get_logger()
 
 
@@ -36,9 +38,13 @@ class NotificationSender(Protocol):
 class PermanentDeliveryError(Exception):
     """Delivery can never succeed, so retrying is pointless.
 
-    The message is stored in `last_error`: it must not carry provider text,
-    phone numbers or emails.
+    It takes a `DeliveryFailure`, not text, so a sender cannot pass provider
+    text through to `last_error` and the API.
     """
+
+    def __init__(self, failure: DeliveryFailure) -> None:
+        super().__init__(failure.code)
+        self.failure = failure
 
 
 class SimulatedWhatsAppSender:
@@ -54,7 +60,7 @@ class SimulatedEmailSender:
     async def send(self, notification: OutboundNotification) -> None:
         email = notification.recipient.email
         if not email:
-            raise PermanentDeliveryError("recipient has no email address")
+            raise PermanentDeliveryError(DeliveryFailure.NO_ADDRESS)
         _log_simulated_send(notification, _mask_email(email))
 
 

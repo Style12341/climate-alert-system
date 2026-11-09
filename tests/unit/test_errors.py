@@ -5,7 +5,7 @@ from pathlib import Path
 
 from climate_alerts import errors
 from climate_alerts.api.errors import HTTP_ERRORS
-from climate_alerts.errors import DomainError
+from climate_alerts.errors import DeliveryFailure, DomainError
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "climate_alerts"
 
@@ -65,3 +65,13 @@ def test_only_the_api_layer_imports_the_web_framework() -> None:
     ]
 
     assert not offenders
+
+
+def test_delivery_failures_have_unique_codes_and_sentence_case_messages() -> None:
+    codes = [failure.code for failure in DeliveryFailure]
+
+    assert len(set(codes)) == len(codes)
+    assert all(re.fullmatch(r"[a-z]+(_[a-z]+)*", code) for code in codes)
+    for failure in DeliveryFailure:
+        assert failure.message[0].isupper(), failure.name
+        assert not failure.message.endswith("."), failure.name

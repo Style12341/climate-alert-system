@@ -1,19 +1,22 @@
 import asyncio
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import timedelta
 from decimal import Decimal
 from typing import Any, Literal
 
 import pytest
+from httpx import AsyncClient
 from sqlalchemy import func, insert, select, text, update
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 from structlog.testing import capture_logs
 
+from climate_alerts.agrobot.models import Field
 from climate_alerts.alerts.models import Alert
 from climate_alerts.config import Settings
 from climate_alerts.db import SessionFactory
+from climate_alerts.errors import DeliveryFailure
 from climate_alerts.notifications.dispatch import (
     DispatchResult,
     Outcome,
@@ -134,13 +137,13 @@ async def test_permanent_error_marks_failed(
     sessions: SessionFactory, settings: Settings
 ) -> None:
     [notification_id] = await create_due_notifications(sessions, 1)
-    sender = FakeSender(error=PermanentDeliveryError("address rejected"))
+    sender = FakeSender(error=PermanentDeliveryError(DeliveryFailure.NO_ADDRESS))
 
     result = await dispatch(sessions, registry(sender), settings)
 
     row = await stored(sessions, notification_id)
     assert row.status == "failed"
-    assert row.last_error == "address rejected"
+    assert row.last_error == DeliveryFailure.NO_ADDRESS.message
     assert sender.calls == [notification_id]
     assert result == DispatchResult(claimed=1, sent=0, retried=0, failed=1)
 
@@ -155,13 +158,51 @@ async def test_transient_error_schedules_retry(
 
     row = await stored(sessions, notification_id)
     assert row.status == "pending"
-    assert row.last_error is not None
-    # Only messages we control reach the column.
-    assert "private" not in row.last_error
-    assert "RuntimeError" in row.last_error
+    assert row.last_error == DeliveryFailure.FAILED.message
     async with sessions() as session:
         assert await session.scalar(select(func.now() < Notification.next_attempt_at))
     assert result == DispatchResult(claimed=1, sent=0, retried=1, failed=0)
+
+
+class LeakyProviderError(Exception):
+    """A class name that must never reach the client."""
+
+
+async def test_unexpected_error_reaches_the_client_only_as_delivery_failed(
+    sessions: SessionFactory,
+    settings: Settings,
+    client: AsyncClient,
+    auth_headers: Callable[[int], dict[str, str]],
+) -> None:
+    secret = "+5491100000000 token=hunter2"
+    async with sessions() as session:
+        alert = await create_owned_alert(session)
+        owner_id = (await session.get_one(Field, alert.field_id)).owner_id
+        notification = await create_notification(session, alert)
+    sender = FakeSender(error=LeakyProviderError(secret))
+
+    with capture_logs() as logs:
+        await dispatch(sessions, registry(sender), settings)
+
+    row = await stored(sessions, notification.id)
+    assert row.last_error == DeliveryFailure.FAILED.message
+    response = await client.get("/api/v1/notifications", headers=auth_headers(owner_id))
+    [item] = response.json()["items"]
+    assert item["last_error"] == "Delivery failed"
+    for leaked in ("hunter2", "+5491100000000", "LeakyProviderError"):
+        assert leaked not in response.text
+    failures = [log for log in logs if log["event"] == "dispatch.send_failed"]
+    assert failures == [
+        {
+            "event": "dispatch.send_failed",
+            "notification_id": notification.id,
+            "channel": "whatsapp",
+            "reason": "delivery_failed",
+            "error_type": "LeakyProviderError",
+            "log_level": "warning",
+        }
+    ]
+    assert "hunter2" not in repr(logs)
 
 
 async def seconds_until_next_attempt(
@@ -246,7 +287,7 @@ async def test_expired_leases_exhaust_attempts(
     row = await stored(sessions, notification_id)
     assert row.attempts == 9
     assert row.status == "failed"
-    assert row.last_error is not None
+    assert row.last_error == DeliveryFailure.ATTEMPTS_EXHAUSTED.message
     assert sender.calls == []
     assert result.failed == 1
 
@@ -262,8 +303,7 @@ async def test_hanging_sender_times_out(
 
     row = await stored(sessions, hanging)
     assert row.status == "pending"
-    assert row.last_error is not None
-    assert "timed out" in row.last_error
+    assert row.last_error == DeliveryFailure.TIMED_OUT.message
     for other in others:
         assert (await stored(sessions, other)).status == "sent"
     assert result == DispatchResult(claimed=3, sent=2, retried=1, failed=0)
@@ -278,7 +318,7 @@ async def test_row_for_channel_without_sender_is_retried(
 
     row = await stored(sessions, notification_id)
     assert row.status == "pending"
-    assert row.last_error == "no sender registered for channel sms"
+    assert row.last_error == DeliveryFailure.CHANNEL_UNAVAILABLE.message
     assert 25 <= await seconds_until_next_attempt(sessions, notification_id) <= 60
     assert result == DispatchResult(claimed=1, sent=0, retried=1, failed=0)
 
@@ -295,7 +335,7 @@ async def test_row_for_channel_without_sender_fails_at_the_maximum(
 
     row = await stored(sessions, notification_id)
     assert row.status == "failed"
-    assert row.last_error == "no sender registered for channel sms"
+    assert row.last_error == DeliveryFailure.CHANNEL_UNAVAILABLE.message
     assert result == DispatchResult(claimed=1, sent=0, retried=0, failed=1)
 
 
@@ -308,8 +348,7 @@ async def test_missing_address_marks_failed(
 
     row = await stored(sessions, notification_id)
     assert row.status == "failed"
-    assert row.last_error is not None
-    assert "email" in row.last_error
+    assert row.last_error == DeliveryFailure.NO_ADDRESS.message
 
 
 async def test_channels_fail_independently(
@@ -496,12 +535,13 @@ async def test_stale_dispatcher_cannot_overwrite(sessions: SessionFactory) -> No
 
 
 @pytest.mark.parametrize(
-    ("final_kind", "final_error"), [("sent", None), ("failed", "address rejected")]
+    ("final_kind", "final_error"),
+    [("sent", None), ("failed", DeliveryFailure.NO_ADDRESS)],
 )
 async def test_final_row_is_not_overwritten_with_matching_attempts(
     sessions: SessionFactory,
     final_kind: Literal["sent", "failed"],
-    final_error: str | None,
+    final_error: DeliveryFailure | None,
 ) -> None:
     [notification_id] = await create_due_notifications(sessions, 1)
     await claim_batch(sessions, 10, LEASE_SECONDS)
@@ -511,12 +551,12 @@ async def test_final_row_is_not_overwritten_with_matching_attempts(
     before = await stored(sessions, notification_id)
 
     # Same `attempts`, so only the status clause of the fence can reject it.
-    late = Outcome(notification_id, 1, "retry", "late result", 60)
+    late = Outcome(notification_id, 1, "retry", DeliveryFailure.FAILED, 60)
     await record_outcomes(sessions, [late])
 
     after = await stored(sessions, notification_id)
     assert after.status == final_kind
-    assert after.last_error == final_error
+    assert after.last_error == (final_error and final_error.message)
     assert after.next_attempt_at == before.next_attempt_at
 
 
@@ -548,15 +588,36 @@ async def test_concurrency_is_bounded(
     assert sender.peak == limited.dispatch_concurrency
 
 
-async def test_error_is_truncated(sessions: SessionFactory, settings: Settings) -> None:
-    [notification_id] = await create_due_notifications(sessions, 1)
-    sender = FakeSender(error=PermanentDeliveryError("x" * 600))
+async def test_every_stored_reason_comes_from_the_fixed_set(
+    sessions: SessionFactory, settings: Settings
+) -> None:
+    """Each way a send can go wrong stores a reason from `DeliveryFailure`."""
+    async with sessions() as session:
+        alert = await create_owned_alert(session)
+        rows = [
+            await create_notification(session, alert, days_ahead=day, **overrides)
+            for day, overrides in enumerate(
+                [
+                    {"channel": "whatsapp"},  # the sender raises
+                    {"channel": "sms"},  # no sender for the channel
+                    {"channel": "email"},  # no email address
+                    {"channel": "whatsapp", "attempts": 8},  # leases expired
+                ]
+            )
+        ]
+    senders = registry(FakeSender(error=LeakyProviderError("+5491100000000")))
+    senders |= build_sender_registry(["email"])
 
-    await dispatch(sessions, registry(sender), settings)
+    await dispatch(sessions, senders, settings)
 
-    row = await stored(sessions, notification_id)
-    assert row.last_error is not None
-    assert len(row.last_error) == 500
+    reasons = {(await stored(sessions, row.id)).last_error for row in rows}
+    assert reasons == {
+        DeliveryFailure.FAILED.message,
+        DeliveryFailure.CHANNEL_UNAVAILABLE.message,
+        DeliveryFailure.NO_ADDRESS.message,
+        DeliveryFailure.ATTEMPTS_EXHAUSTED.message,
+    }
+    assert reasons <= {failure.message for failure in DeliveryFailure}
 
 
 async def test_runs_batches_until_nothing_is_due(

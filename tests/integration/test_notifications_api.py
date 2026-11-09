@@ -11,6 +11,7 @@ from climate_alerts.alerts.models import Alert
 from climate_alerts.api.app import create_app
 from climate_alerts.config import Settings
 from climate_alerts.db import SessionFactory
+from climate_alerts.errors import DeliveryFailure
 from climate_alerts.notifications.models import Notification
 from tests.integration.factories import (
     create_alert,
@@ -300,3 +301,10 @@ async def test_deleted_alert_keeps_history(
     response = await client.get(URL, headers=headers)
 
     assert [item["id"] for item in response.json()["items"]] == [notification.id]
+
+
+async def test_openapi_lists_the_delivery_failure_reasons(client: AsyncClient) -> None:
+    schemas = (await client.get("/openapi.json")).json()["components"]["schemas"]
+
+    description = schemas["NotificationOut"]["properties"]["last_error"]["description"]
+    assert all(failure.message in description for failure in DeliveryFailure)

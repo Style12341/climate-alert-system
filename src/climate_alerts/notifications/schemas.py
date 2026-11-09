@@ -1,9 +1,17 @@
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
+from climate_alerts.errors import DeliveryFailure
 from climate_alerts.notifications.models import NotificationStatus
+
+LAST_ERROR_DESCRIPTION = (
+    "Why the last delivery attempt failed, null once sent. Always one of: "
+    + "; ".join(failure.message for failure in DeliveryFailure)
+    + ". Internal errors are logged, never returned."
+)
 
 
 class NotificationOut(BaseModel):
@@ -19,7 +27,7 @@ class NotificationOut(BaseModel):
     threshold: Decimal
     status: NotificationStatus
     attempts: int
-    last_error: str | None
+    last_error: Annotated[str | None, Field(description=LAST_ERROR_DESCRIPTION)]
     created_at: datetime
     sent_at: datetime | None
 

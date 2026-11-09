@@ -50,5 +50,5 @@ async def test_seeded_forecast_reaches_the_notification_history(
         for item in other.json()["items"]
     } == {
         ("whatsapp", "sent", None),
-        ("email", "failed", "recipient has no email address"),
+        ("email", "failed", "Recipient has no address for this channel"),
     }
