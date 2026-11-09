@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -207,6 +207,30 @@ async def test_enabling_a_channel_adds_only_that_channel(
     rows = await stored_notifications(sessions)
     assert second.created == 1
     assert [row.channel for row in rows] == ["whatsapp", "email"]
+
+
+async def test_notification_keeps_the_values_that_triggered_it(
+    sessions: SessionFactory, settings: Settings
+) -> None:
+    async with sessions() as session:
+        field, alert = await create_field_with_alert(session, threshold="70")
+        await create_forecast(session, field, 1, "90")
+
+    await evaluate(sessions, settings)
+    async with sessions.begin() as session:
+        await session.execute(
+            update(WeatherForecast)
+            .where(WeatherForecast.field_id == field.id)
+            .values(probability=Decimal("95"))
+        )
+        await session.execute(
+            update(Alert).where(Alert.id == alert.id).values(threshold=Decimal("75"))
+        )
+    await evaluate(sessions, settings)
+
+    [row] = await stored_notifications(sessions)
+    assert row.probability == Decimal("90")
+    assert row.threshold == Decimal("70")
 
 
 async def test_chunks_cover_all_alerts(

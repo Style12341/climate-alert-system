@@ -168,6 +168,19 @@ async def test_value_does_not_depend_on_the_day_it_is_seeded(
     assert all(first[key] == second[key] for key in overlap)
 
 
+async def test_scenario_moves_with_the_seeded_day(
+    sessions: SessionFactory, settings: Settings
+) -> None:
+    next_day = SOME_DAY + timedelta(days=1)
+    key = ("Buenos Aires", next_day, "frost")
+    await seed(sessions, settings, today=SOME_DAY)
+    assert (await stored_forecasts(sessions))[key] == Decimal("85.00")
+
+    await seed(sessions, settings, today=next_day)
+
+    assert (await stored_forecasts(sessions))[key] <= 40
+
+
 async def test_background_stays_below_thresholds(
     sessions: SessionFactory, settings: Settings
 ) -> None:
@@ -226,7 +239,6 @@ async def test_user_without_email_is_in_the_scenario(
     sessions: SessionFactory, settings: Settings
 ) -> None:
     seeded = await seed(sessions, settings)
-    await evaluate_alerts(sessions, settings, asyncio.Event())
 
     async with sessions() as session:
         owners = await session.execute(
@@ -275,7 +287,8 @@ async def test_command_prints_credentials_without_contact_details(
 ) -> None:
     # In a temporary directory so a developer's .env cannot change the run.
     code, stdout, stderr = await run_seed_command(
-        command_environment(postgres_url, "x" * 32), tmp_path
+        command_environment(postgres_url, settings.jwt_secret.get_secret_value()),
+        tmp_path,
     )
 
     assert code == 0, stderr
@@ -303,4 +316,6 @@ async def test_command_fails_with_non_zero_exit(tmp_path: Path) -> None:
     )
 
     assert code != 0
+    assert stderr.startswith("seed failed: ")
+    assert "Traceback" not in stderr
     assert "hunter2" not in stdout + stderr

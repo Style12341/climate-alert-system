@@ -187,6 +187,49 @@ async def test_oversized_field_filter_returns_422(
     assert response.status_code == 422
 
 
+async def test_read_own_alert(
+    client: AsyncClient, sessions: SessionFactory, auth_headers: AuthHeaders
+) -> None:
+    user, field = await owner_with_field(sessions)
+    async with sessions() as session:
+        alert = await create_alert(session, field, "hail", threshold="72.50")
+
+    response = await client.get(
+        f"/api/v1/alerts/{alert.id}", headers=auth_headers(user.id)
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == alert.id
+    assert body["field_id"] == field.id
+    assert body["event_type"] == "hail"
+    assert Decimal(body["threshold"]) == Decimal("72.50")
+
+
+@pytest.mark.parametrize(
+    ("method", "payload"),
+    [("GET", None), ("PATCH", {"threshold": 10})],
+    ids=["get", "patch"],
+)
+async def test_soft_deleted_alert_returns_404(
+    client: AsyncClient,
+    sessions: SessionFactory,
+    auth_headers: AuthHeaders,
+    method: str,
+    payload: dict[str, int] | None,
+) -> None:
+    user, field = await owner_with_field(sessions)
+    async with sessions() as session:
+        alert = await create_alert(session, field)
+    url = f"/api/v1/alerts/{alert.id}"
+    headers = auth_headers(user.id)
+    assert (await client.delete(url, headers=headers)).status_code == 204
+
+    response = await client.request(method, url, json=payload, headers=headers)
+
+    assert response.status_code == 404
+
+
 async def test_read_foreign_alert_returns_404(
     client: AsyncClient, sessions: SessionFactory, auth_headers: AuthHeaders
 ) -> None:

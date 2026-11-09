@@ -133,7 +133,11 @@ async def _delete_field_with_alerts(s: AsyncSession) -> Violation:
             "fk_weather_forecasts_event_type_climate_event_types",
             id="unknown_event_on_forecast",
         ),
-        pytest.param(_invalid_timezone, "Mars/Olympus", id="invalid_timezone"),
+        pytest.param(
+            _invalid_timezone,
+            'time zone "Mars/Olympus" not recognized',
+            id="invalid_timezone",
+        ),
         pytest.param(
             _unknown_status, "ck_notifications_status_valid", id="unknown_status"
         ),

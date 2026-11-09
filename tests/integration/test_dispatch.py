@@ -161,6 +161,60 @@ async def test_transient_error_schedules_retry(
     assert result == DispatchResult(claimed=1, sent=0, retried=1, failed=0)
 
 
+async def seconds_until_next_attempt(
+    sessions: SessionFactory, notification_id: int
+) -> float:
+    async with sessions() as session:
+        remaining = await session.scalar(
+            select(Notification.next_attempt_at - func.now()).where(
+                Notification.id == notification_id
+            )
+        )
+    assert remaining is not None
+    return remaining.total_seconds()
+
+
+@pytest.mark.parametrize(
+    ("previous_attempts", "shortest", "longest"),
+    [
+        pytest.param(0, 30, 60, id="first_attempt"),
+        pytest.param(2, 120, 240, id="third_attempt"),
+    ],
+)
+async def test_retry_stores_the_backoff_not_the_lease(
+    sessions: SessionFactory,
+    settings: Settings,
+    previous_attempts: int,
+    shortest: float,
+    longest: float,
+) -> None:
+    [notification_id] = await create_due_notifications(
+        sessions, 1, attempts=previous_attempts
+    )
+    sender = FakeSender(error=RuntimeError("down"))
+
+    await dispatch(sessions, registry(sender), settings)
+
+    remaining = await seconds_until_next_attempt(sessions, notification_id)
+    # The lower bound has slack for the time between recording and reading.
+    assert shortest - 5 <= remaining <= longest
+    assert remaining < LEASE_SECONDS
+
+
+async def test_soft_deleted_alert_is_still_delivered(
+    sessions: SessionFactory, settings: Settings
+) -> None:
+    [notification_id] = await create_due_notifications(sessions, 1)
+    async with sessions.begin() as session:
+        await session.execute(update(Alert).values(deleted_at=func.now()))
+    sender = FakeSender()
+
+    await dispatch(sessions, registry(sender), settings)
+
+    assert (await stored(sessions, notification_id)).status == "sent"
+    assert sender.calls == [notification_id]
+
+
 async def test_last_attempt_marks_failed(
     sessions: SessionFactory, settings: Settings
 ) -> None:

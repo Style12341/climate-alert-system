@@ -165,6 +165,49 @@ async def test_stop_gives_up_after_timeout(
     assert [entry["drained"] for entry in stopped] == [False]
 
 
+async def test_stop_before_run_never_starts_a_job(
+    settings: Settings,
+    sessions: SessionFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    async def count_call(*_: object) -> EvaluationResult:
+        nonlocal calls
+        calls += 1
+        return EMPTY_EVALUATION
+
+    monkeypatch.setattr("climate_alerts.worker.evaluate_alerts", count_call)
+    worker = Worker(
+        settings.model_copy(update=NEVER_AGAIN),
+        sessions,
+        build_sender_registry(("whatsapp",)),
+    )
+
+    worker.request_stop()
+    await asyncio.wait_for(worker.run(), 10)
+
+    assert calls == 0
+
+
+async def test_job_queued_before_the_stop_does_nothing_after_it(
+    settings: Settings, sessions: SessionFactory
+) -> None:
+    """Exercises the guard directly: `run()` pauses before a queued job can start."""
+    calls = 0
+
+    async def job() -> None:
+        nonlocal calls
+        calls += 1
+
+    worker = Worker(settings, sessions, build_sender_registry(("whatsapp",)))
+    worker.request_stop()
+
+    await worker._run_contained("evaluation", job)
+
+    assert calls == 0
+
+
 def worker_environment(database_url: str, channels: str) -> dict[str, str]:
     return {
         **os.environ,

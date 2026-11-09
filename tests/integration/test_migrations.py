@@ -77,8 +77,9 @@ async def test_migration_seeds_catalog(sessions: SessionFactory) -> None:
         rows = await session.execute(
             select(ClimateEventType.code, ClimateEventType.label)
         )
+        catalog = {code: label for code, label in rows}
 
-    assert {code: label for code, label in rows} == {
+    assert catalog == {
         "frost": "Helada",
         "rain": "Lluvia",
         "hail": "Granizo",

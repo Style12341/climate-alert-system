@@ -7,7 +7,7 @@ SRC = Path(__file__).resolve().parents[2] / "src"
 def test_no_legacy_query_calls() -> None:
     offenders = []
     for path in SRC.rglob("*.py"):
-        for node in ast.walk(ast.parse(path.read_text())):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if (
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Attribute)
