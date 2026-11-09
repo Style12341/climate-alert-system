@@ -2,10 +2,11 @@ import asyncio
 from collections import Counter
 from collections.abc import Mapping
 from datetime import timedelta
+from decimal import Decimal
 from typing import Any, Literal
 
 import pytest
-from sqlalchemy import func, select, text, update
+from sqlalchemy import func, insert, select, text, update
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 from structlog.testing import capture_logs
@@ -394,30 +395,64 @@ async def test_claim_stays_within_batch_size_with_stale_statistics(
     assert len(claimed) == 5
 
 
-async def test_claim_picks_ids_once_and_updates_by_primary_key(
-    sessions: SessionFactory,
-) -> None:
-    """The ids must come from an InitPlan, evaluated once, not a semi join.
-
-    A semi join either re-runs the subquery per outer row, which breaks the
-    batch bound, or hashes it and scans the whole table to match against it.
-    """
-    await create_due_notifications(sessions, 1)
-    async with sessions.begin() as session:
-        await session.execute(text("ANALYZE notifications"))
-    await create_due_notifications(sessions, 20)
-
-    statement = build_claim_statement(5, LEASE_SECONDS)
+async def explain_claim(sessions: SessionFactory, batch_size: int) -> str:
+    statement = build_claim_statement(batch_size, LEASE_SECONDS)
     compiled = statement.compile(
         dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
     )
     async with sessions() as session:
         connection = await session.connection()
         result = await connection.exec_driver_sql(f"EXPLAIN {compiled}")
-        plan = "\n".join(row[0] for row in result)
+        return "\n".join(row[0] for row in result)
+
+
+async def test_claim_selects_ids_once(sessions: SessionFactory) -> None:
+    """With stale statistics the ids come from an InitPlan, not a semi join.
+
+    A semi join may re-run the subquery per outer row, which breaks the batch
+    bound.
+    """
+    await create_due_notifications(sessions, 1)
+    async with sessions.begin() as session:
+        await session.execute(text("ANALYZE notifications"))
+    await create_due_notifications(sessions, 20)
+
+    plan = await explain_claim(sessions, 5)
 
     assert "InitPlan" in plan
     assert "Semi Join" not in plan
+
+
+async def test_claim_updates_by_primary_key(sessions: SessionFactory) -> None:
+    """With healthy statistics the claimed rows are found through the primary key.
+
+    A form the planner turns into a hash semi join scans the whole table on
+    every claim instead.
+    """
+    async with sessions() as session:
+        alert = await create_owned_alert(session)
+        today = (await session.execute(select(func.current_date()))).scalar_one()
+        await session.execute(
+            insert(Notification),
+            [
+                {
+                    "alert_id": alert.id,
+                    "forecast_date": today + timedelta(days=day),
+                    "channel": "whatsapp",
+                    "probability": Decimal("90"),
+                    "threshold": alert.threshold,
+                }
+                for day in range(3000)
+            ],
+        )
+        await session.commit()
+    async with sessions.begin() as session:
+        await session.execute(text("ANALYZE notifications"))
+
+    plan = await explain_claim(sessions, 50)
+
+    assert "Index Scan using pk_notifications on notifications" in plan
+    assert "Seq Scan on notifications" not in plan
 
 
 async def test_leased_rows_are_invisible(sessions: SessionFactory) -> None:
