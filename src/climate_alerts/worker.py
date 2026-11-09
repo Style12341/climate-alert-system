@@ -75,7 +75,7 @@ class Worker:
         await self._stopping.wait()
 
         scheduler.pause()
-        logger.info("worker.stopping", drained=not self._running)
+        logger.info("worker.stopping")
         # APScheduler cancels running jobs on shutdown and cannot wait for
         # them, even with wait=True, so they are drained here first.
         await self._wait_for_running(self._settings.worker_shutdown_timeout_seconds)
