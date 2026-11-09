@@ -16,6 +16,8 @@ from climate_alerts.config import Settings
 from climate_alerts.db import SessionFactory
 from climate_alerts.notifications.models import Notification
 
+logger = structlog.get_logger()
+
 
 @dataclass(frozen=True)
 class EvaluationResult:
@@ -98,9 +100,6 @@ async def evaluate_alerts(
     A chunk that fails is rolled back, skipped and retried on the next run, so
     it cannot block the alerts after it. `stopping` is checked between chunks.
     """
-    # Fetched here: `cache_logger_on_first_use` would pin a module-level logger
-    # to its first configuration, out of reach of structlog's `capture_logs`.
-    logger = structlog.get_logger()
     started = time.perf_counter()
     created = chunks = failed_chunks = 0
     after_id = 0

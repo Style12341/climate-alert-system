@@ -6,6 +6,8 @@ from typing import Protocol
 
 import structlog
 
+logger = structlog.get_logger()
+
 
 @dataclass(frozen=True)
 class Recipient:
@@ -78,9 +80,6 @@ def _mask_email(email: str) -> str:
 
 
 def _log_simulated_send(notification: OutboundNotification, masked_to: str) -> None:
-    # Fetched here: `cache_logger_on_first_use` would pin a module-level logger
-    # to its first configuration, out of reach of structlog's `capture_logs`.
-    logger = structlog.get_logger()
     logger.info(
         "notification.simulated_send",
         notification_id=notification.notification_id,

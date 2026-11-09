@@ -23,6 +23,8 @@ from climate_alerts.notifications.senders import (
 # from hanging on a job stuck in cleanup, not a value an operator would tune.
 _CANCELLATION_GRACE_SECONDS = 0.5
 
+logger = structlog.get_logger()
+
 Job = Callable[[], Awaitable[object]]
 
 
@@ -50,7 +52,6 @@ class Worker:
 
     async def run(self) -> None:
         """Run the jobs until `request_stop`, then drain them."""
-        logger = structlog.get_logger()
         scheduler = AsyncIOScheduler(timezone=UTC)
         self._add_job(
             scheduler,
@@ -129,7 +130,6 @@ class Worker:
             await job()
         except Exception as exc:
             # The type only: driver messages can carry connection details.
-            logger = structlog.get_logger()
             logger.error("worker.job_failed", job=name, error_type=type(exc).__name__)
 
     async def _wait_for_running(self, limit_seconds: float) -> None:

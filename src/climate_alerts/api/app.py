@@ -32,10 +32,13 @@ def _validation_error_body(exc: RequestValidationError) -> str:
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
+    resolved = settings or get_settings()
+    # Here and not in the lifespan: uvicorn calls this factory before its first
+    # log line, so that line and every later one are JSON.
+    configure_logging(resolved.log_level)
+
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        resolved = settings or get_settings()
-        configure_logging(resolved.log_level)
         engine = build_engine(resolved)
         app.state.settings = resolved
         app.state.sessions = build_session_factory(engine)

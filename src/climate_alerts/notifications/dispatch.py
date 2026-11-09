@@ -23,6 +23,8 @@ from climate_alerts.notifications.senders import (
 
 MAX_ERROR_LENGTH = 500
 
+logger = structlog.get_logger()
+
 
 @dataclass(frozen=True)
 class Claimed:
@@ -236,9 +238,6 @@ async def dispatch_due(
     `stopping` is checked between batches, so a batch that has started is
     finished and recorded. No transaction is open while sending.
     """
-    # Fetched here: `cache_logger_on_first_use` would pin a module-level logger
-    # to its first configuration, out of reach of structlog's `capture_logs`.
-    logger = structlog.get_logger()
     started = time.perf_counter()
     jitter = rng if rng is not None else random.Random()  # noqa: S311 - not security
     semaphore = asyncio.Semaphore(settings.dispatch_concurrency)
