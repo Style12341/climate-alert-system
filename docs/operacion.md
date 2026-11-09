@@ -139,9 +139,11 @@ Los resultados están en las decisiones [3](Decisiones.md#3-job-periódico-apsch
 - `dependencies`: `pip-audit` sobre las dependencias de `uv.lock` y `scripts/license_audit.py`. Falla con una vulnerabilidad conocida o con una licencia ausente o copyleft sin revisar.
 - `secrets`: gitleaks sobre todo el historial de git. Falla si encuentra un secreto.
 - `container`: construye la imagen y la analiza con Trivy, junto con el `Dockerfile`. Falla con una vulnerabilidad CRITICAL o HIGH que ya tenga corrección, o con una mala configuración CRITICAL o HIGH.
-- `dast`: levanta el stack con Compose, corre `scripts/smoke_test.sh` y escanea la API con ZAP, autenticado con el token de un usuario de prueba. Falla si falla la colección o si ZAP reporta una alerta de nivel FAIL. El informe de ZAP queda como artefacto de la ejecución.
+- `dast`: levanta el stack con Compose, corre `scripts/smoke_test.sh` y escanea la API con ZAP, autenticado con el token de un usuario de prueba. Falla si falla la colección o si ZAP reporta cualquier alerta que `.zap/rules.tsv` no marque como IGNORE. El informe de ZAP queda como artefacto de la ejecución.
 - `sast`: CodeQL para Python. Falla si el análisis no termina; los hallazgos aparecen en la pestaña Security de GitHub. En un repositorio privado requiere GitHub Advanced Security.
 
 Dependabot (`.github/dependabot.yml`) propone cada semana actualizaciones de las dependencias de Python, de las acciones y de la imagen base.
+
+Dependabot no actualiza lo que está fijado dentro de `ci.yml` como entrada de una acción o en un comando. Se actualiza a mano: los digests de las imágenes de ZAP y de gitleaks, la versión de Trivy, la versión de pip-audit y `UV_VERSION`.
 
 La integración continua **no** despliega, no hace pruebas de carga y no ejecuta el sistema de forma sostenida.
