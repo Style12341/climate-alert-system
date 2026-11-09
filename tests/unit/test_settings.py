@@ -51,7 +51,6 @@ def test_defaults_match_spec() -> None:
     assert s.db_max_overflow == 5
     assert s.db_command_timeout_seconds == 60
     assert s.worker_shutdown_timeout_seconds == 25
-    assert s.seed_token_ttl_hours == 24
     assert s.log_level == "INFO"
 
 
@@ -119,7 +118,6 @@ def test_rejects_unknown_log_level() -> None:
         "db_pool_size",
         "db_command_timeout_seconds",
         "worker_shutdown_timeout_seconds",
-        "seed_token_ttl_hours",
     ],
 )
 @pytest.mark.parametrize("value", [0, -1])

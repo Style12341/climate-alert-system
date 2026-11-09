@@ -32,6 +32,7 @@ from climate_alerts.db import SessionFactory, build_engine, build_session_factor
 _FORECAST_DAYS = 16
 _RANDOM_SEED = 20240229
 _MAX_BACKGROUND_HUNDREDTHS = 4000
+_TOKEN_TTL = timedelta(hours=24)
 
 _BUENOS_AIRES = "Buenos Aires"
 _MONTEVIDEO = "Montevideo"
@@ -214,12 +215,11 @@ async def seed(
 
         await _upsert_forecasts(session, forecasts)
 
-    ttl = timedelta(hours=settings.seed_token_ttl_hours)
     return [
         SeededUser(
             id=user_id,
             field_ids=owned,
-            token=issue_token(user_id, settings, ttl),
+            token=issue_token(user_id, settings, _TOKEN_TTL),
             has_email=spec.email is not None,
         )
         for user_id, owned, spec in zip(user_ids, field_ids, _USERS, strict=True)
