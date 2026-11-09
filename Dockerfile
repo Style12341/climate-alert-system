@@ -40,4 +40,10 @@ COPY migrations ./migrations
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1
 
+# The upgrade takes Debian fixes the base image does not have yet. pip is
+# removed because its vendored packages carry CVEs and nothing runs it: uv
+# built the virtual environment in the builder stage.
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/* \
+    && /usr/local/bin/python -m pip uninstall --yes pip
+
 USER app
