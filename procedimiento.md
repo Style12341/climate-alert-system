@@ -1,7 +1,5 @@
 # Procedimiento
 
-> **Borrador vivo.** Se completa a medida que avanza el trabajo.
-
 Este documento cuenta cómo encaré el challenge: en qué orden trabajé, qué reglas me puse y qué cambió en el camino. El detalle técnico de cada elección está en [Decisiones.md](Decisiones.md).
 
 ## En resumen
@@ -9,8 +7,8 @@ Este documento cuenta cómo encaré el challenge: en qué orden trabajé, qué r
 1. Leí el enunciado buscando qué se evalúa realmente.
 2. Investigué antes de decidir, con fuentes primarias y mediciones.
 3. Discutí el alcance y el modelo de datos antes de escribir código.
-4. Sigo el orden PRD, especificación, plan e implementación.
-5. Cierro con tests, revisión y documentación de lo que haya faltado.
+4. Seguí el orden PRD, especificación, plan e implementación.
+5. Cerré con tests, mediciones sobre el código final y documentación de lo que faltó.
 
 ## Cómo leí el enunciado
 
@@ -61,7 +59,11 @@ Trabajé con Claude Code como herramienta. Yo definí el alcance, las prioridade
 
 La decisión de asociar los pronósticos a `field_id` se mantuvo, pero cambió su justificación. Ya no se apoya en que compartir celda sea raro, sino en la simplicidad, en la fidelidad al enunciado y en que la ingesta está fuera de alcance.
 
-## Qué sigue
+**Una reserva que podía superar el tamaño del lote.** Con estadísticas desactualizadas, PostgreSQL podía volver a ejecutar la subconsulta de la reserva y tomar más filas de las pedidas. Lo reproduje en PostgreSQL 17 y pasé la selección a una CTE `MATERIALIZED`, que se evalúa una sola vez.
+
+**La medición final no repitió un número.** Volví a medir con el código real. La evaluación coincidió con lo esperado (9,82 s), pero la entrega tardó 917 s en lugar de 34 a 40 s. El benchmark inicial registraba cada lote con un solo `UPDATE`, y el código final lo hace fila por fila. La velocidad sigue siendo muy superior al límite del proveedor, así que lo dejé como está y lo registré en [Decisiones.md](Decisiones.md#12-volumen-y-batching).
+
+## Estado final
 
 - [x] Cerrar volumen y batching con mediciones.
 - [x] Definir las tablas `alerts` y `notifications`, y verificar el esquema en PostgreSQL.
@@ -70,5 +72,6 @@ La decisión de asociar los pronósticos a `field_id` se mantuvo, pero cambió s
 - [x] Escribir el PRD.
 - [x] Escribir la especificación.
 - [x] Escribir el plan de implementación.
-- [ ] Implementar con tests sobre PostgreSQL real.
-- [ ] Hacer la revisión final y documentar lo que haya faltado.
+- [x] Implementar con tests sobre PostgreSQL real.
+- [x] Volver a medir con las sentencias finales y auditar las licencias de todas las dependencias.
+- [x] Documentar lo que faltó, en el [README](README.md#lo-que-faltó).

@@ -1,7 +1,5 @@
 # Decisiones de diseño
 
-> **Borrador vivo.** Se edita a medida que avanza el trabajo. Cada decisión indica si está cerrada o abierta.
-
 Este documento explica qué se decidió, por qué, qué se descartó y qué límites acepta cada elección. El criterio general es mantenerse fiel al enunciado y preferir soluciones probadas, sin abstracciones que no resuelvan un problema concreto.
 
 ## Resumen
@@ -128,6 +126,17 @@ El detalle de cada tabla y sus diagramas están en [ModeloDeDatos.md](ModeloDeDa
 
 Ninguna cambia la elección. PgQueuer y Procrastinate son las alternativas técnicamente más cercanas. Pierden por adopción y porque duplicarían una cola que el modelo de datos ya resuelve.
 
+**Auditoría de todas las dependencias** (9 de noviembre de 2026): `scripts/license_audit.py` recorre `uv.lock` completo y lee la licencia declarada en PyPI de cada versión exacta.
+
+| Resultado | Paquetes |
+|-----------|----------|
+| Total | 52: 27 de ejecución y 25 solo de desarrollo |
+| Sin licencia declarada | 0 |
+| Copyleft en ejecución | 0 |
+| Copyleft solo en desarrollo | 2: `certifi` y `pathspec`, ambos MPL-2.0 |
+
+MPL-2.0 es un copyleft débil, por archivo: las obligaciones alcanzan a los archivos de esos paquetes si se modifican y se distribuyen. Aquí no se modifican ni se distribuyen. `certifi` llega por `httpx` y `requests`, y `pathspec` por `mypy`. La imagen se construye con `uv sync --no-dev`, así que ninguno de los dos se incluye. Esto se basa en metadata declarada por cada autor: no es una revisión legal.
+
 ## 4. Datos climáticos: una fila por campo, día y evento
 
 **Decisión:**
@@ -245,7 +254,7 @@ No se integra WhatsApp, como indica el enunciado. El envío queda detrás de una
 
 **Dato de contexto:** Meta documenta 80 mensajes por segundo por número como valor por defecto, y responde con el error `130429` al excederlo. A ese ritmo, 21.600 notificaciones tardarían 4,5 minutos, y el peor caso, 4 horas.
 
-**Medición:** benchmark descartable a 24.000 campos, con PostgreSQL 17 sin ajustes, 28 núcleos, 31 GiB de memoria y envío simulado.
+**Medición inicial:** benchmark descartable a 24.000 campos, con PostgreSQL 17 sin ajustes, 28 núcleos, 31 GiB de memoria y envío simulado.
 
 | Escenario | Tiempo | WAL | Memoria del cliente |
 |-----------|--------|-----|---------------------|
@@ -288,7 +297,22 @@ Un sistema recién desplegado tiene esa tabla vacía justo en su primera corrida
 2. El envío ocurre fuera de la transacción, con concurrencia limitada.
 3. Se registra el resultado de cada fila.
 
-La base no es el cuello de botella: procesó entre 28.900 y 68.100 filas por segundo con envío simulado, mientras que el límite real es el del proveedor.
+La base no es el cuello de botella. La medición inicial procesó entre 28.900 y 68.100 filas por segundo con envío simulado. El código final procesa unas 1.256 filas por segundo (ver la medición final), cerca de 16 veces los 80 mensajes por segundo que Meta documenta por número.
+
+**Medición final** (9 de noviembre de 2026): `scripts/volume_benchmark.py` usa `build_evaluation_statement`, `build_claim_statement`, `record_outcomes` y el esquema real de la migración. Corrió con PostgreSQL 17.11 sin ajustes, 28 CPU lógicas, un canal y `notifications` analizada vacía.
+
+| Escenario | Tiempo | WAL | Memoria máxima del cliente |
+|-----------|--------|-----|----------------------------|
+| Peor caso, 1.152.000 notificaciones en 15 lotes de 5.000 alertas | 9,82 s (lote más lento: 0,74 s) | 463 MiB | 83 MiB |
+| Entrega en 2.304 lotes de 500, 1 dispatcher, sin envío | **917 s** | 1.255 MiB | 88 MiB |
+
+**Comparación con la medición inicial:**
+
+- **Evaluación: coincide.** 9,82 s contra 10,0 s, y 463 MiB de WAL contra 443 MiB. La sentencia final se comporta como la medida.
+- **Entrega: es unas 25 veces más lenta.** 917 s contra 34 a 40 s, es decir, 1.256 filas por segundo. El benchmark inicial marcaba cada lote como enviado con un único `UPDATE`. El código final, en `record_outcomes`, ejecuta un `UPDATE` por fila, porque cada una lleva su propio control de `attempts`. Es la causa más probable, aunque no se midió por separado. Sigue por encima del límite del proveedor, así que se acepta.
+- **Memoria: no es comparable en valor absoluto.** 83 MiB contra 36 MiB, porque este proceso también carga Alembic y el ORM. Lo relevante se mantiene: el peor caso sumó 0,4 MiB sobre la carga inicial.
+- **Autovacuum: esta vez corrió.** 8 veces sobre `notifications` durante la entrega. Al terminar había 181.500 tuplas muertas y la tabla ocupaba 330 MB.
+- **Reserva: correcta.** Ningún lote superó las 500 filas, las 1.152.000 terminaron en `sent` y todas con `attempts = 1`.
 
 **Qué significa "no perder notificaciones":**
 
@@ -301,10 +325,10 @@ La base no es el cuello de botella: procesó entre 28.900 y 68.100 filas por seg
 
 **Límites de esta medición:**
 
-- La combinación exacta propuesta (`ON CONFLICT` con `ORDER BY`, sin anti join) no se midió. Se verifica en la implementación.
+- Las cifras de la tabla inicial salen de un benchmark descartable, con sentencias anteriores a las finales. Las sentencias finales están en la medición final.
 - El supuesto de 3 alertas por campo no tiene respaldo en datos reales.
-- Las colas no se probaron de forma sostenida: autovacuum no llegó a correr durante las pruebas de entrega.
-- Una entrega escribe cerca de 1 GiB de WAL por cada 1,15 millones de filas, porque `status` forma parte del índice parcial. Con volúmenes normales no es relevante.
+- Las colas no se probaron de forma sostenida. En la medición inicial autovacuum no llegó a correr. En la final corrió 8 veces, pero sigue siendo una sola corrida de 15 minutos.
+- Una entrega escribe entre 1 y 1,2 GiB de WAL por cada 1,15 millones de filas, porque `status` forma parte del índice parcial. Con volúmenes normales no es relevante.
 - Si el worker está caído hasta que pasa la fecha del pronóstico, ese día ya no se evalúa.
 
 ## 13. Parámetros operativos
@@ -335,7 +359,7 @@ Los intervalos, reintentos y plazos de reserva están en la [especificación](do
 
 **Límite real del lote:** `UPDATE ... WHERE id IN (SELECT ... LIMIT n FOR UPDATE SKIP LOCKED)` puede reservar más de `n` filas con ciertos planes, porque PostgreSQL puede volver a ejecutar la subconsulta. Se reprodujo en PostgreSQL 17 con estadísticas desactualizadas. Por eso la selección se hace en una CTE `MATERIALIZED`, que se evalúa una sola vez.
 
-**Límite aceptado:** esta reserva difiere levemente de la que se midió en el benchmark, por lo que se vuelve a verificar en la implementación.
+**Verificado:** la reserva final se midió con 1.152.000 filas. Ningún lote superó el tamaño pedido y ninguna fila se reservó dos veces (decisión 12).
 
 ## 15. Alertas: sin `user_id` y sin pausa
 
@@ -485,19 +509,19 @@ Usuarios y campos no tienen endpoints propios porque pertenecen a Agrobot.
 
 | Pedido del enunciado | Cómo se cumple | Estado |
 |----------------------|----------------|--------|
-| Aprovechar datos meteorológicos ya disponibles | `weather_forecasts`, alimentada por una ingesta simulada | Diseñado |
-| Una entrada por día y evento, con su probabilidad | Clave primaria y columna `probability` | Diseñado |
-| Definir la tabla meteorológica y mockear sus datos | Tabla definida y datos generados por un comando (decisión 20) | Diseñado |
-| Alertas sobre sus campos, con evento y umbral | Tabla `alerts` | Diseñado |
-| Un job evalúa periódicamente y genera notificaciones | Evaluador con APScheduler | Diseñado |
-| Notificar al usuario | Dispatcher con envío simulado | Diseñado |
-| Sin integración con WhatsApp | El envío está detrás de una interfaz simulada | Diseñado |
-| Endpoints y API REST | Decisión 19 | Diseñado |
-| Código production-ready y asincronía | Decisiones de este documento | En implementación |
-| Modelo de datos sólido | [ModeloDeDatos.md](ModeloDeDatos.md) | Diseñado |
-| FastAPI, SQLAlchemy, PostgreSQL y Alembic | Se usan. APScheduler se justifica en la decisión 3 | Diseñado |
-| Repositorio, README, migraciones y tests | Dependen de la implementación | Pendiente |
-| Documentar lo que falte | Sección del README | Previsto |
+| Aprovechar datos meteorológicos ya disponibles | `weather_forecasts`, alimentada por una ingesta simulada | Hecho |
+| Una entrada por día y evento, con su probabilidad | Clave primaria y columna `probability` | Hecho |
+| Definir la tabla meteorológica y mockear sus datos | Tabla definida y datos generados por un comando (decisión 20) | Hecho |
+| Alertas sobre sus campos, con evento y umbral | Tabla `alerts` | Hecho |
+| Un job evalúa periódicamente y genera notificaciones | Evaluador con APScheduler | Hecho |
+| Notificar al usuario | Dispatcher con envío simulado | Hecho |
+| Sin integración con WhatsApp | El envío está detrás de una interfaz simulada | Hecho |
+| Endpoints y API REST | Decisión 19 | Hecho |
+| Código production-ready y asincronía | Decisiones de este documento | Hecho |
+| Modelo de datos sólido | [ModeloDeDatos.md](ModeloDeDatos.md) | Hecho |
+| FastAPI, SQLAlchemy, PostgreSQL y Alembic | Se usan. APScheduler se justifica en la decisión 3 | Hecho |
+| Repositorio, README, migraciones y tests | Este repositorio, con migraciones Alembic y tests sobre PostgreSQL real | Hecho |
+| Documentar lo que falte | [Sección del README](README.md#lo-que-faltó) | Hecho |
 
 **Interpretaciones propias, porque el enunciado no las define:**
 
@@ -572,7 +596,10 @@ El objetivo es un sistema simple, sin construir todo lo que rodea a un producto 
 
 ## Temas abiertos
 
-No quedan temas de diseño abiertos.
+No quedan temas de diseño abiertos. Quedan dos temas de verificación:
+
+- **Comportamiento sostenido de la cola.** Solo se midieron corridas puntuales. Autovacuum corrió en la última, pero no se probó una cola con carga durante horas.
+- **Costo de `record_outcomes`.** Un `UPDATE` por fila explica, con toda probabilidad, que la entrega sea unas 25 veces más lenta que en la medición inicial. No es un problema frente al límite del proveedor. Si dejara de serlo, se podría agrupar por lote manteniendo el control de `attempts` en cada fila.
 
 ## Fuentes
 

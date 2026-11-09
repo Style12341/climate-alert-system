@@ -396,6 +396,8 @@ claimed = (
 #   joined through alerts, fields and users
 ```
 
+Note: the implemented claim selects the ids in a `MATERIALIZED` CTE; see `ModeloDeDatos.md`.
+
 Send with `asyncio.timeout` under a semaphore, outside any transaction. Each outcome update filters on `id`, `attempts` and `status == "pending"`. Log `dispatch.completed`.
 
 - [ ] **Step 4: Run tests to verify they pass, then commit**

@@ -1,7 +1,5 @@
 # Modelo de datos
 
-> **Borrador vivo.** El esquema y las consultas de este documento se ejecutaron en PostgreSQL 17 con 38 comprobaciones de comportamiento. Las migraciones reales se escriben en la implementación.
-
 El modelo tiene seis tablas. Un usuario es dueño de varios campos y configura alertas sobre ellos. Cada alerta genera, como máximo, una notificación por fecha pronosticada y canal. Cada notificación es también el registro de su entrega en ese canal.
 
 Las reglas críticas viven en la base de datos, de modo que se cumplen aunque haya varios workers o un proceso falle a mitad de camino. El porqué de cada elección está en [Decisiones.md](Decisiones.md).
@@ -27,7 +25,7 @@ erDiagram
         bigint id PK
         bigint owner_id FK
         text name
-        text timezone "zona IANA valida"
+        text timezone "zona IANA válida"
         timestamptz created_at
     }
     climate_event_types {
@@ -48,7 +46,7 @@ erDiagram
         numeric threshold "mayor que 0, hasta 100"
         timestamptz created_at
         timestamptz updated_at
-        timestamptz deleted_at "null si esta vigente"
+        timestamptz deleted_at "null si está vigente"
     }
     notifications {
         bigint id PK
@@ -96,13 +94,16 @@ El evaluador trabaja dentro de PostgreSQL con una sola sentencia por lote: ningu
 
 ```mermaid
 stateDiagram-v2
+    direction LR
     [*] --> pending: el evaluador crea la fila
-    pending --> pending: se reserva, falla de forma transitoria o vence la reserva
+    pending --> pending: reserva o reintento
     pending --> sent: envío confirmado
     pending --> failed: error permanente o reintentos agotados
     sent --> [*]
     failed --> [*]
 ```
+
+La transición de `pending` a `pending` cubre tres casos: se reserva la fila, el envío falla de forma transitoria o vence la reserva.
 
 "En curso" no es un estado guardado. Reservar una fila es mover `next_attempt_at` hacia el futuro: mientras esa fecha no llegue, ningún dispatcher la ve. Si el proceso cae, la fila vuelve a estar disponible sin necesidad de un proceso de recuperación.
 
@@ -276,6 +277,8 @@ JOIN users u ON u.id = f.owner_id;
 ```
 
 ## Qué se comprobó
+
+El esquema lo crea la migración `migrations/versions/0001_initial_schema.py`. Estos comportamientos se verifican con la suite de tests sobre PostgreSQL 17 real.
 
 | Área | Comportamiento verificado |
 |------|---------------------------|
