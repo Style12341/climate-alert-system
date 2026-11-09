@@ -1,8 +1,11 @@
 from functools import lru_cache
-from typing import Annotated
+from typing import Annotated, Literal, Self
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+PositiveCount = Annotated[int, Field(gt=0)]
+PositiveSeconds = Annotated[float, Field(gt=0)]
 
 
 class Settings(BaseSettings):
@@ -14,36 +17,38 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # Required, no default: the application refuses to start without them.
-    database_url: str
+    database_url: SecretStr
     jwt_secret: Annotated[SecretStr, Field(min_length=32)]
 
-    jwt_algorithm: str = "HS256"
+    jwt_algorithm: Literal["HS256", "HS384", "HS512"] = "HS256"
 
-    evaluation_interval_seconds: float = 300
-    evaluation_chunk_size: int = 5000
+    evaluation_interval_seconds: PositiveSeconds = 300
+    evaluation_chunk_size: PositiveCount = 5000
 
     # Kept as a plain string: pydantic-settings would expect JSON for a
     # list field, but this variable is comma-separated. See enabled_channels.
     notification_channels: str = "whatsapp"
 
-    dispatch_interval_seconds: float = 5
-    dispatch_batch_size: int = 500
-    dispatch_concurrency: int = 40
-    dispatch_send_timeout_seconds: float = 10
-    dispatch_lease_seconds: float = 300
-    dispatch_max_attempts: int = 8
-    dispatch_backoff_base_seconds: float = 60
-    dispatch_backoff_cap_seconds: float = 3600
+    dispatch_interval_seconds: PositiveSeconds = 5
+    dispatch_batch_size: PositiveCount = 500
+    dispatch_concurrency: PositiveCount = 40
+    dispatch_send_timeout_seconds: PositiveSeconds = 10
+    dispatch_lease_seconds: PositiveSeconds = 300
+    dispatch_max_attempts: PositiveCount = 8
+    dispatch_backoff_base_seconds: PositiveSeconds = 60
+    dispatch_backoff_cap_seconds: PositiveSeconds = 3600
 
-    default_page_size: int = 50
-    max_page_size: int = 200
+    default_page_size: PositiveCount = 50
+    max_page_size: PositiveCount = 200
 
-    db_pool_size: int = 5
-    db_max_overflow: int = 5
+    db_pool_size: PositiveCount = 5
+    # Zero is a real choice here: no connections beyond the pool.
+    db_max_overflow: Annotated[int, Field(ge=0)] = 5
+    db_command_timeout_seconds: PositiveSeconds = 60
 
-    worker_shutdown_timeout_seconds: float = 25
-    seed_token_ttl_hours: float = 24
-    log_level: str = "INFO"
+    worker_shutdown_timeout_seconds: PositiveSeconds = 25
+    seed_token_ttl_hours: PositiveSeconds = 24
+    log_level: Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"] = "INFO"
 
     @field_validator("notification_channels")
     @classmethod
@@ -51,6 +56,27 @@ class Settings(BaseSettings):
         if not _parse_channels(value):
             raise ValueError("NOTIFICATION_CHANNELS must name at least one channel")
         return value
+
+    @model_validator(mode="after")
+    def _check_page_sizes(self) -> Self:
+        if self.default_page_size > self.max_page_size:
+            raise ValueError("default_page_size must not exceed max_page_size")
+        return self
+
+    @model_validator(mode="after")
+    def _check_lease_outlasts_a_batch(self) -> Self:
+        slowest_batch = (
+            self.dispatch_batch_size
+            / self.dispatch_concurrency
+            * self.dispatch_send_timeout_seconds
+        )
+        if self.dispatch_lease_seconds <= slowest_batch:
+            # A shorter lease expires mid-batch, so rows are claimed and sent twice.
+            raise ValueError(
+                "dispatch_lease_seconds must exceed the slowest batch "
+                f"({slowest_batch} s)"
+            )
+        return self
 
     @property
     def enabled_channels(self) -> tuple[str, ...]:

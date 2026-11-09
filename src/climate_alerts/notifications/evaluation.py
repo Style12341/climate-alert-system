@@ -125,7 +125,7 @@ async def evaluate_alerts(
                     CursorResult[typing.Any], await session.execute(statement)
                 )
             created += result.rowcount
-        except SQLAlchemyError as exc:
+        except (SQLAlchemyError, TimeoutError) as exc:
             failed_chunks += 1
             # The type only: driver messages can carry connection details.
             logger.warning(

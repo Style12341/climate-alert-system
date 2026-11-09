@@ -249,8 +249,21 @@ async def test_chunks_cover_all_alerts(
     assert result.created == 5
 
 
+@pytest.mark.parametrize(
+    "error",
+    [
+        pytest.param(
+            OperationalError("INSERT", {}, Exception("connection lost")), id="database"
+        ),
+        # asyncpg's command_timeout surfaces unwrapped, not as a SQLAlchemyError.
+        pytest.param(TimeoutError(), id="command_timeout"),
+    ],
+)
 async def test_failing_chunk_does_not_block_later_alerts(
-    sessions: SessionFactory, settings: Settings, monkeypatch: pytest.MonkeyPatch
+    sessions: SessionFactory,
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
 ) -> None:
     async with sessions() as session:
         first_field, _ = await create_field_with_alert(session)
@@ -265,7 +278,7 @@ async def test_failing_chunk_does_not_block_later_alerts(
         nonlocal calls
         calls += 1
         if calls == 1:
-            raise OperationalError("INSERT", {}, Exception("connection lost"))
+            raise error
         return real_builder(*args)
 
     monkeypatch.setattr(evaluation, "build_evaluation_statement", fail_first_call)

@@ -2,6 +2,7 @@ from collections.abc import Callable
 
 from fastapi import FastAPI
 from httpx import AsyncClient
+from pydantic import SecretStr
 from structlog.testing import capture_logs
 
 from climate_alerts.config import Settings
@@ -52,7 +53,9 @@ async def test_ready_when_database_is_down(
 ) -> None:
     # Port 1 is reserved and nothing listens on it.
     unreachable = settings.model_copy(
-        update={"database_url": "postgresql+asyncpg://user:pass@127.0.0.1:1/none"}
+        update={
+            "database_url": SecretStr("postgresql+asyncpg://user:pass@127.0.0.1:1/none")
+        }
     )
     engine = build_engine(unreachable)
     app.state.sessions = build_session_factory(engine)

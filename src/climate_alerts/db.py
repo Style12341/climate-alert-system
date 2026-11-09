@@ -26,9 +26,14 @@ class Base(DeclarativeBase):
 
 def build_engine(settings: Settings) -> AsyncEngine:
     return create_async_engine(
-        settings.database_url,
+        settings.database_url.get_secret_value(),
         pool_size=settings.db_pool_size,
         max_overflow=settings.db_max_overflow,
+        # A connection PostgreSQL dropped would otherwise fail its next use.
+        pool_pre_ping=True,
+        # Without it, a query on a vanished host never returns, and with
+        # max_instances=1 the scheduler then skips every later run.
+        connect_args={"command_timeout": settings.db_command_timeout_seconds},
     )
 
 
