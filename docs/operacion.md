@@ -26,9 +26,7 @@ La API queda en <http://localhost:8000>. El comando de datos simulados imprime l
 
 ## Datos de desarrollo en Compose
 
-El puerto de la API se publica solo en `127.0.0.1`, porque el `JWT_SECRET` de `compose.yaml` es público.
-
-`JWT_SECRET` y la contraseña de la base que aparecen en `compose.yaml` son solo para desarrollo. Son públicos: no se deben usar en ningún despliegue real. La aplicación no define un valor por defecto para ninguno de los dos.
+`JWT_SECRET` y la contraseña de la base que aparecen en `compose.yaml` son públicos y solo sirven para desarrollo: no se deben usar en ningún despliegue real. Por eso el puerto de la API se publica solo en `127.0.0.1`. La aplicación no define un valor por defecto para ninguno de los dos.
 
 Para borrar todo, incluidos los datos:
 
@@ -66,7 +64,7 @@ Los decimales se devuelven como texto, por ejemplo `"70.00"`.
 
 ## Usar la colección
 
-La carpeta `collection/` recorre el flujo completo con validaciones. Tiene dos archivos:
+La carpeta `collection/` recorre el flujo completo con validaciones. Está en formato Postman Collection v2.1, el único que abren las dos herramientas: Postman de forma nativa y Bruno con su [importador](https://docs.usebruno.com/get-started/import-export-data/postman-migration). Tiene dos archivos:
 
 - `climate-alerts.postman_collection.json`: la colección.
 - `local.postman_environment.json`: el entorno.
@@ -117,7 +115,7 @@ Los errores de validación conservan la lista de FastAPI. Un evento inexistente 
 
 Los errores internos se registran en los logs y nunca se devuelven al cliente. Por eso `last_error`, en `GET /api/v1/notifications`, solo muestra un motivo de un conjunto fijo, como `Delivery failed`.
 
-El catálogo completo de códigos está en la [sección 7 de `SPEC.md`](SPEC.md#7-api), y el razonamiento en la [decisión 25](Decisiones.md#25-manejo-de-errores).
+El catálogo completo de códigos está en la [sección 7 de `SPEC.md`](SPEC.md#7-api), y el razonamiento en la [decisión 16](Decisiones.md#16-manejo-de-errores).
 
 ## Scripts
 
@@ -128,19 +126,23 @@ El catálogo completo de códigos está en la [sección 7 de `SPEC.md`](SPEC.md#
 | `scripts/volume_benchmark.py` | Mide las sentencias reales a 24.000 campos. **Vacía las tablas** de la base que recibe, así que rechaza cualquier host que no sea `localhost` o `127.0.0.1` |
 | `scripts/smoke_test.sh` | Levanta el stack con Compose, espera la primera evaluación y el primer envío, y corre la colección con Newman. Deja el stack levantado. No es una prueba de carga ni reinicia la base: si hubo cambios manuales, ejecutar antes `docker compose down -v` |
 
-Los resultados están en las decisiones [3](Decisiones.md#3-job-periódico-apscheduler-3x), [12](Decisiones.md#12-volumen-y-batching) y [14](Decisiones.md#14-estado-de-entrega-next_attempt_at-como-plazo-de-reserva).
+Los resultados están en las decisiones [2](Decisiones.md#2-job-periódico-apscheduler-3x), [6](Decisiones.md#6-estado-de-entrega-next_attempt_at-como-plazo-de-reserva) y [10](Decisiones.md#10-volumen-y-batching).
 
 ## Integración continua
 
 `.github/workflows/ci.yml` corre en cada push y pull request a `main`. Los trabajos son independientes y corren en paralelo:
 
-- `lint`: `ruff check`, `ruff format --check` y `mypy src`. Falla con cualquier error de estilo, de formato o de tipos.
-- `test`: la suite de `pytest` contra PostgreSQL 17 con Testcontainers. Falla si una prueba falla.
-- `dependencies`: `pip-audit` sobre las dependencias de `uv.lock` y `scripts/license_audit.py`. Falla con una vulnerabilidad conocida o con una licencia ausente o copyleft sin revisar.
-- `secrets`: gitleaks sobre todo el historial de git. Falla si encuentra un secreto.
-- `container`: construye la imagen y la analiza con Trivy, junto con el `Dockerfile`. Falla con una vulnerabilidad CRITICAL o HIGH que ya tenga corrección, o con una mala configuración CRITICAL o HIGH.
-- `dast`: levanta el stack con Compose, corre `scripts/smoke_test.sh` y escanea la API con ZAP, autenticado con el token de un usuario de prueba. Falla si falla la colección o si ZAP reporta cualquier alerta que `.zap/rules.tsv` no marque como IGNORE. Con un archivo de reglas, ZAP corre su política activa completa (`Default Policy`) en lugar de `API-Minimal`. El informe de ZAP queda como artefacto de la ejecución.
-- `sast`: CodeQL para Python. Falla si el análisis no termina; los hallazgos aparecen en la pestaña Security de GitHub. En un repositorio privado requiere GitHub Advanced Security.
+| Trabajo | Herramienta | Falla cuando |
+|---------|-------------|--------------|
+| `lint` | `ruff check`, `ruff format --check` y `mypy src` | Hay un error de estilo, de formato o de tipos |
+| `test` | `pytest` contra PostgreSQL 17 con Testcontainers | Falla una prueba |
+| `dependencies` | `pip-audit` sobre `uv.lock` y `scripts/license_audit.py` | Hay una vulnerabilidad conocida, o una licencia ausente o copyleft sin revisar |
+| `secrets` | gitleaks sobre todo el historial de git | Encuentra un secreto |
+| `container` | Trivy sobre la imagen y el `Dockerfile` | Hay una vulnerabilidad CRITICAL o HIGH que ya tenga corrección, o una mala configuración CRITICAL o HIGH |
+| `dast` | Compose, `scripts/smoke_test.sh` y ZAP, autenticado con el token de un usuario de prueba | Falla la colección, o ZAP reporta una alerta que `.zap/rules.tsv` no marque como IGNORE |
+| `sast` | CodeQL para Python | El análisis no termina |
+
+Con un archivo de reglas, ZAP corre su política activa completa (`Default Policy`) en lugar de `API-Minimal`, y su informe queda como artefacto de la ejecución. Los hallazgos de CodeQL aparecen en la pestaña Security de GitHub; en un repositorio privado requiere GitHub Advanced Security.
 
 Dependabot (`.github/dependabot.yml`) propone cada semana actualizaciones de las dependencias de Python, de las acciones y de la imagen base.
 
