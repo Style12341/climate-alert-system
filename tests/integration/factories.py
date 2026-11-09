@@ -1,20 +1,30 @@
-"""Row factories for integration tests.
+"""Row factories and shared helpers for integration tests.
 
-Each one commits, so the row is visible to other sessions, as it would be in
+Each factory commits, so the row is visible to other sessions, as it would be in
 production. Numeric arguments accept anything `Decimal(str(value))` can parse.
 """
 
+import asyncio
+from collections.abc import Mapping
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from itertools import count
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from climate_alerts.agrobot.models import Field, User, WeatherForecast
 from climate_alerts.alerts.models import Alert
-from climate_alerts.notifications.models import Notification
+from climate_alerts.config import Settings
+from climate_alerts.db import SessionFactory
+from climate_alerts.notifications.dispatch import DispatchResult, dispatch_due
+from climate_alerts.notifications.models import Notification, NotificationStatus
+from climate_alerts.notifications.senders import (
+    NotificationSender,
+    OutboundNotification,
+)
 
 _phone_numbers = count(1)
 
@@ -97,3 +107,74 @@ async def create_notification(
 
 def _local_date(field: Field, days_ahead: int) -> date:
     return datetime.now(ZoneInfo(field.timezone)).date() + timedelta(days=days_ahead)
+
+
+# Dispatch helpers shared by test_dispatch and test_claim.
+
+LEASE_SECONDS = 300
+
+
+class FakeSender:
+    """Records every call, then fails or hangs as configured."""
+
+    def __init__(
+        self,
+        channel: str = "whatsapp",
+        error: Exception | None = None,
+        hang_ids: frozenset[int] = frozenset(),
+    ) -> None:
+        self.channel = channel
+        self.error = error
+        self.hang_ids = hang_ids
+        self.calls: list[int] = []
+
+    async def send(self, notification: OutboundNotification) -> None:
+        self.calls.append(notification.notification_id)
+        if notification.notification_id in self.hang_ids:
+            await asyncio.Event().wait()
+        if self.error is not None:
+            raise self.error
+
+
+def registry(*senders: NotificationSender) -> dict[str, NotificationSender]:
+    return {sender.channel: sender for sender in senders}
+
+
+async def create_owned_alert(session: AsyncSession, email: str | None = None) -> Alert:
+    user = await create_user(session, email=email)
+    field = await create_field(session, user, name="La Esperanza")
+    return await create_alert(session, field)
+
+
+async def create_due_notifications(
+    sessions: SessionFactory, count: int, **overrides: Any
+) -> list[int]:
+    async with sessions() as session:
+        alert = await create_owned_alert(session)
+        created = [
+            await create_notification(session, alert, days_ahead=day, **overrides)
+            for day in range(count)
+        ]
+    return [notification.id for notification in created]
+
+
+async def stored(sessions: SessionFactory, notification_id: int) -> Notification:
+    async with sessions() as session:
+        return await session.get_one(Notification, notification_id)
+
+
+async def expire_leases(sessions: SessionFactory) -> None:
+    async with sessions.begin() as session:
+        await session.execute(
+            update(Notification)
+            .where(Notification.status == NotificationStatus.PENDING.value)
+            .values(next_attempt_at=func.now() - timedelta(seconds=1))
+        )
+
+
+async def dispatch(
+    sessions: SessionFactory,
+    senders: Mapping[str, NotificationSender],
+    settings: Settings,
+) -> DispatchResult:
+    return await dispatch_due(sessions, senders, settings, asyncio.Event())
