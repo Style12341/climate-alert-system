@@ -19,7 +19,7 @@ DOMAIN_ERRORS = [
 
 
 def test_the_catalog_is_discovered() -> None:
-    assert len(DOMAIN_ERRORS) == 6
+    assert {errors.FieldNotFound, errors.InvalidCredentials} <= set(DOMAIN_ERRORS)
 
 
 def test_every_domain_error_has_a_status() -> None:

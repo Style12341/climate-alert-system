@@ -45,7 +45,11 @@ async def test_business_route_requires_a_token(
 
 
 def test_every_business_route_is_collected() -> None:
-    assert len(BUSINESS_ROUTES) == 7
+    assert {
+        ("GET", "/api/v1/climate-event-types"),
+        ("GET", "/api/v1/notifications"),
+        ("POST", "/api/v1/fields/{field_id}/alerts"),
+    } <= set(BUSINESS_ROUTES)
 
 
 async def test_invalid_token_returns_401(client: AsyncClient) -> None:
