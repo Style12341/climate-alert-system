@@ -158,9 +158,9 @@ The full table is in `Decisiones.md`. These must be covered by tests:
 
 Status of the gaps recorded before implementation. Details are in `Decisiones.md`, decisions 3 and 12.
 
-- **Resolved.** The final evaluation statement was measured at full scale: 1,152,000 rows in 15 chunks took 9.82 s, slowest chunk 0.74 s, 463 MiB of WAL, in line with the earlier 10.0 s.
-- **Resolved.** The final claim was measured on 1,152,000 rows: no batch exceeded 500, and every row ended `sent`. The drain took 917 s against the earlier 34 to 40 s. The earlier spike recorded each batch with one `UPDATE`, while `record_outcomes` runs one per row. That is the likely cause, not measured separately. It is about 1,256 rows per second, still above the provider limit.
-- **Still open.** Sustained queue behaviour is unmeasured. Autovacuum ran 8 times on `notifications` during the final drain, but that is one 15-minute run.
+- **Resolved.** The final evaluation statement was measured at full scale: 1,152,000 rows in 15 chunks took 8.71 s, slowest chunk 0.64 s, 463 MiB of WAL, in line with the earlier 10.0 s.
+- **Resolved.** The final claim was measured on 1,152,000 rows: no batch exceeded 500, and every row ended `sent`. The drain took 863 s against the earlier 34 to 40 s: the claim took 24.0 s and `record_outcomes` 836.9 s. The earlier spike recorded each batch with one `UPDATE`, while `record_outcomes` runs one per row. It is about 1,335 rows per second, still above the provider limit. An earlier run with the claim in a `MATERIALIZED` CTE took 917 s but did not split the time between the two steps.
+- **Still open.** Sustained queue behaviour is unmeasured. Autovacuum ran 7 times on `notifications` during the final drain, but that is one 14-minute run.
 - **Resolved.** All five Mermaid diagrams in `ModeloDeDatos.md` were rendered and checked. The state diagram had overlapping labels and now runs left to right with a shorter label.
 - **Resolved.** The full dependency tree was audited: 52 packages, none without a declared license, no copyleft at runtime, and two MPL-2.0 packages used only in development (`certifi` and `pathspec`).
 - **Resolved.** Both scripts are in `scripts/`.

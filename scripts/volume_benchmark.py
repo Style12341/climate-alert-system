@@ -14,7 +14,8 @@ It loads 24,000 farms, 16 days, 7 events and 3 alerts per farm through the
 schema of the migration, with every forecast over its threshold. It then runs
 the worst case in chunks of 5,000 alerts with one channel, and drains the
 resulting 1,152,000 notifications in batches of 500. Each step prints wall
-time, WAL and peak client memory.
+time, WAL and peak client memory, and the drain splits its time between the
+claim and recording the outcomes.
 
 What it does NOT do:
 
@@ -238,22 +239,31 @@ async def drain(sessions: SessionFactory) -> None:
     """Claim and record with the real code. No send happens between the two."""
     claimed = 0
     batches = 0
+    claim_seconds = record_seconds = 0.0
     while True:
         statement = build_claim_statement(BATCH_SIZE, LEASE_SECONDS)
+        started = time.perf_counter()
         async with sessions.begin() as session:
             rows = (await session.execute(statement)).all()
+        claim_seconds += time.perf_counter() - started
         if not rows:
             break
         if len(rows) > BATCH_SIZE:
             raise RuntimeError(f"claim returned {len(rows)} rows")
+        started = time.perf_counter()
         await record_outcomes(
             sessions, [Outcome(r.id, r.attempts, "sent", None, None) for r in rows]
         )
+        record_seconds += time.perf_counter() - started
         claimed += len(rows)
         batches += 1
 
     require(claimed, EXPECTED_NOTIFICATIONS, "notifications claimed")
     print(f"drain batches: {batches}, rows {claimed}", flush=True)
+    print(
+        f"drain split: claim {claim_seconds:.2f} s, record {record_seconds:.2f} s",
+        flush=True,
+    )
 
 
 async def run(url: URL) -> None:

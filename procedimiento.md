@@ -63,7 +63,7 @@ La decisión de asociar los pronósticos a `field_id` se mantuvo, pero cambió s
 
 **Una CTE que acotaba el lote pero recorría la tabla.** Cuestioné si la CTE `MATERIALIZED` de la reserva hacía falta. Al medirla, vi que mantenía el lote acotado, pero recorría la tabla entera en cada reserva: con 100.000 filas pendientes, 23,0 ms. Una sola sentencia con `ARRAY(...)` también respeta el lote y actualiza por clave primaria: 7,5 ms. Pasé la reserva a esa sentencia.
 
-**La medición final no repitió un número.** Volví a medir con el código real. La evaluación coincidió con lo esperado (9,82 s), pero la entrega tardó 917 s en lugar de 34 a 40 s. El benchmark inicial registraba cada lote con un solo `UPDATE`, y el código final lo hace fila por fila. La velocidad sigue siendo muy superior al límite del proveedor, así que lo dejé como está y lo registré en [Decisiones.md](Decisiones.md#12-volumen-y-batching).
+**La medición final no repitió un número.** Volví a medir con el código real. La evaluación coincidió con lo esperado, pero la entrega tardó 917 s en lugar de 34 a 40 s. Después de cambiar la reserva volví a medir, esta vez separando los dos pasos: 8,71 s de evaluación y 863 s de entrega, de los que 24,0 s fueron la reserva y 836,9 s el registro de resultados. El benchmark inicial registraba cada lote con un solo `UPDATE`, y el código final lo hace fila por fila. La velocidad sigue siendo muy superior al límite del proveedor, así que lo dejé como está y lo registré en [Decisiones.md](Decisiones.md#12-volumen-y-batching).
 
 ## Estado final
 

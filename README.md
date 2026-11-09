@@ -151,7 +151,7 @@ Lo que el enunciado pedía está hecho. Esto es lo que quedó sin hacer o sin pr
 
 - **Envío e ingesta reales.** Los dos son simulados: el enunciado excluye WhatsApp y pide mockear los datos.
 - **Carga sostenida.** El benchmark es una sola corrida en una máquina, sin envío. No se midió el comportamiento de autovacuum con la cola funcionando durante horas.
-- **Registro de envíos por lote.** El dispatcher registra cada resultado con un `UPDATE` propio. Drenar 1.152.000 notificaciones tardó 917 s, unas 1.256 por segundo. Supera el límite de 80 mensajes por segundo del proveedor, por lo que no se optimizó.
+- **Registro de envíos por lote.** El dispatcher registra cada resultado con un `UPDATE` propio. Drenar 1.152.000 notificaciones tardó 863 s, unas 1.335 por segundo, y 836,9 s de ese tiempo fueron el registro de resultados. Supera el límite de 80 mensajes por segundo del proveedor, por lo que no se optimizó.
 - **Hardware de producción.** Los números salen de PostgreSQL sin ajustes en una notebook.
 - **Supuestos sin datos reales.** Las 3 alertas por campo son una estimación.
 - **Bruno.** La importación se comprobó con su convertidor oficial, pero no se ejecutó la colección dentro de la aplicación. En Postman se usó Newman, que es su ejecutor de línea de comandos.

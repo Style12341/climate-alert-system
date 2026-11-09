@@ -298,21 +298,21 @@ Un sistema recién desplegado tiene esa tabla vacía justo en su primera corrida
 2. El envío ocurre fuera de la transacción, con concurrencia limitada.
 3. Se registra el resultado de cada fila.
 
-La base no es el cuello de botella. La medición inicial procesó entre 28.900 y 68.100 filas por segundo con envío simulado. El código final procesa unas 1.256 filas por segundo (ver la medición final), cerca de 16 veces los 80 mensajes por segundo que Meta documenta por número.
+La base no es el cuello de botella. La medición inicial procesó entre 28.900 y 68.100 filas por segundo con envío simulado. El código final procesa unas 1.335 filas por segundo (ver la medición final), cerca de 17 veces los 80 mensajes por segundo que Meta documenta por número.
 
-**Medición final** (9 de noviembre de 2026): `scripts/volume_benchmark.py` usa `build_evaluation_statement`, `build_claim_statement`, `record_outcomes` y el esquema real de la migración. Corrió con PostgreSQL 17.11 sin ajustes, 28 CPU lógicas, un canal y `notifications` analizada vacía.
+**Medición final** (9 de noviembre de 2026, repetida después de pasar la reserva a una sola sentencia): `scripts/volume_benchmark.py` usa `build_evaluation_statement`, `build_claim_statement`, `record_outcomes` y el esquema real de la migración. Corrió con PostgreSQL 17.11 sin ajustes, 28 CPU lógicas, un canal y `notifications` analizada vacía.
 
 | Escenario | Tiempo | WAL | Memoria máxima del cliente |
 |-----------|--------|-----|----------------------------|
-| Peor caso, 1.152.000 notificaciones en 15 lotes de 5.000 alertas | 9,82 s (lote más lento: 0,74 s) | 463 MiB | 83 MiB |
-| Entrega en 2.304 lotes de 500, 1 dispatcher, sin envío | **917 s** | 1.255 MiB | 88 MiB |
+| Peor caso, 1.152.000 notificaciones en 15 lotes de 5.000 alertas | 8,71 s (lote más lento: 0,64 s) | 463 MiB | 83 MiB |
+| Entrega en 2.304 lotes de 500, 1 dispatcher, sin envío | **863 s** (reserva 24,0 s, registro de resultados 836,9 s) | 1.236 MiB | 89 MiB |
 
 **Comparación con la medición inicial:**
 
-- **Evaluación: coincide.** 9,82 s contra 10,0 s, y 463 MiB de WAL contra 443 MiB. La sentencia final se comporta como la medida.
-- **Entrega: es unas 25 veces más lenta.** 917 s contra 34 a 40 s, es decir, 1.256 filas por segundo. El benchmark inicial marcaba cada lote como enviado con un único `UPDATE`. El código final, en `record_outcomes`, ejecuta un `UPDATE` por fila, porque cada una lleva su propio control de `attempts`. Es la causa más probable, aunque no se midió por separado. Sigue por encima del límite del proveedor, así que se acepta.
+- **Evaluación: coincide.** 8,71 s contra 10,0 s, y 463 MiB de WAL contra 443 MiB. La sentencia final se comporta como la medida.
+- **Entrega: es entre 22 y 25 veces más lenta.** 863 s contra 34 a 40 s, es decir, unas 1.335 filas por segundo. La medición separa los dos pasos: la reserva sumó 24,0 s y `record_outcomes` 836,9 s, el 97 % del total. El benchmark inicial marcaba cada lote como enviado con un único `UPDATE`, mientras que `record_outcomes` ejecuta un `UPDATE` por fila, porque cada una lleva su propio control de `attempts`. Una corrida anterior, con la reserva en una CTE `MATERIALIZED`, tardó 917 s, pero no separaba los tiempos, así que no se sabe qué parte correspondía a la reserva. Sigue por encima del límite del proveedor, así que se acepta.
 - **Memoria: no es comparable en valor absoluto.** 83 MiB contra 36 MiB, porque este proceso también carga Alembic y el ORM. Lo relevante se mantiene: el peor caso sumó 0,4 MiB sobre la carga inicial.
-- **Autovacuum: esta vez corrió.** 8 veces sobre `notifications` durante la entrega.
+- **Autovacuum: esta vez corrió.** 7 veces sobre `notifications` durante la entrega.
 - **Reserva: correcta.** Ningún lote superó las 500 filas y las 1.152.000 terminaron en `sent`.
 
 **Qué significa "no perder notificaciones":**
@@ -628,7 +628,7 @@ El objetivo es un sistema simple, sin construir todo lo que rodea a un producto 
 No quedan temas de diseño abiertos. Quedan dos temas de verificación:
 
 - **Comportamiento sostenido de la cola.** Solo se midieron corridas puntuales. Autovacuum corrió en la última, pero no se probó una cola con carga durante horas.
-- **Costo de `record_outcomes`.** Un `UPDATE` por fila explica, con toda probabilidad, que la entrega sea unas 25 veces más lenta que en la medición inicial. No es un problema frente al límite del proveedor. Si dejara de serlo, se podría agrupar por lote manteniendo el control de `attempts` en cada fila.
+- **Costo de `record_outcomes`.** Ocupó 836,9 s de los 863 s de la entrega medida, contra 24,0 s de la reserva. Ejecuta un `UPDATE` por fila, mientras que la medición inicial, entre 22 y 25 veces más rápida, usaba uno por lote. No es un problema frente al límite del proveedor. Si dejara de serlo, se podría agrupar por lote manteniendo el control de `attempts` en cada fila.
 
 ## Fuentes
 
