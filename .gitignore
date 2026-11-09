@@ -1,0 +1,11 @@
+.superpowers/
+.worktrees/
+.venv/
+__pycache__/
+*.pyc
+.env
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+dist/
