@@ -79,6 +79,22 @@ Compose habilita los dos canales de demostración, así que es esperable una fil
 
 Los decimales se devuelven como texto, por ejemplo `"70.00"`.
 
+## Errores
+
+Los errores usan la forma estándar de FastAPI con un `code` estable, pensado para que un cliente decida sin leer el mensaje:
+
+```json
+{"detail": "Alert not found", "code": "alert_not_found"}
+```
+
+Los errores de validación conservan la lista de FastAPI. Un evento inexistente usa la misma forma:
+
+```json
+{"detail": [{"type": "unknown_event_type", "loc": ["body", "event_type"], "msg": "Unknown event type"}]}
+```
+
+El catálogo de códigos y el razonamiento están en la [decisión 25](Decisiones.md#25-manejo-de-errores).
+
 ## Usar la colección
 
 La carpeta `collection/` recorre el flujo completo con validaciones. Tiene dos archivos:

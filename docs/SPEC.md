@@ -43,11 +43,13 @@ src/climate_alerts/
   db.py                  Engine and session factory, declarative base, naming convention
   logs.py                structlog setup
   auth.py                Token verification
+  errors.py              Error catalog: every application error, its code and message
   worker.py              Scheduler, signals, shutdown
   api/
     app.py               create_app, lifespan, routers
     dependencies.py      Session, current user, shared request types
-    schemas.py           ErrorOut and the declared error responses
+    errors.py            Error to HTTP mapping, exception handlers, documented error responses
+    schemas.py           ErrorOut
     health.py            Liveness and readiness
   agrobot/               Mock of the pre-existing system
     models.py            User, Field, ClimateEventType, WeatherForecast
@@ -147,7 +149,38 @@ jwt.decode(token, secret, algorithms=[algorithm], options={"require": ["exp", "s
 
 ## 7. API
 
-Errors use FastAPI's default `{"detail": ...}` format. A validation error is a `422` whose `detail` is a list of objects containing `type`, `loc` and `msg`, including the checks made at runtime (an unknown event, `limit` above the maximum). Other errors carry a string `detail` and are declared in the OpenAPI document as `ErrorOut`. Business routes are under `/api/v1` and require a token.
+Business routes are under `/api/v1` and require a token.
+
+### Errors
+
+Errors keep FastAPI's standard shape, with one addition: a stable, machine-readable `code` in snake_case.
+
+- **HTTP errors:** `{"detail": "<message>", "code": "<code>"}`, declared in the OpenAPI document as `ErrorOut`. Messages are English, sentence case, without a trailing period, and never carry a value from the request or the database.
+- **Validation errors:** a `422` whose `detail` is a list of objects with only `type`, `loc` and `msg`. Runtime checks use the same shape: an unknown event has `type` `unknown_event_type` at `loc` `["body", "event_type"]`, and `limit` above the maximum has `type` `limit_too_large` at `["query", "limit"]`.
+
+**Catalog.** `errors.py` defines `DomainError` and every application error, each with a `code` and a `message`. It knows nothing about HTTP. Services and `auth.verify_token` raise these errors, and routers do not catch them. Nothing outside the API layer imports FastAPI or Starlette, which a unit test enforces.
+
+| Error | `code` | Status | Message |
+|-------|--------|--------|---------|
+| `FieldNotFound` | `field_not_found` | `404` | Field not found |
+| `AlertNotFound` | `alert_not_found` | `404` | Alert not found |
+| `AlertAlreadyExists` | `alert_already_exists` | `409` | An active alert already exists for this field and event type |
+| `UnknownEventType` | `unknown_event_type` | `422`, validation shape | Unknown event type |
+| `InvalidCredentials` | `invalid_credentials` | `401` | Invalid or expired token |
+| `DatabaseUnavailable` | `database_unavailable` | `503` | Database unavailable |
+
+**Mapping and handlers.** `api/errors.py` holds the only mapping from error to status, and `register_error_handlers` installs, from `create_app`:
+
+- `DomainError`: the mapped status and body. A `401` adds `WWW-Authenticate: Bearer`.
+- Starlette's `HTTPException`, which covers `HTTPBearer`'s missing token (`401` `unauthorized`), unknown routes (`404` `not_found`) and wrong methods (`405` `method_not_allowed`): `exc.detail`, the status phrase in snake_case as `code`, and the exception's headers.
+- `RequestValidationError`: the validation shape above.
+- Anything else: `500` `{"detail": "Internal server error", "code": "internal_error"}`, and one `api.unhandled_error` log with the error type only. This is a middleware rather than an `Exception` handler, because Starlette's `ServerErrorMiddleware` re-raises after calling that handler, and uvicorn would then log the error a second time with its message and traceback.
+
+**Documentation.** Each route declares the catalog errors it can return, and `error_responses(...)` builds its OpenAPI `responses`: status, description and an example per `code`, all from the error classes. Errors in the validation shape add nothing, since FastAPI already documents the `422`.
+
+**Database errors.** The engine uses `hide_parameters=True`, so bound values such as phone numbers and emails never appear in exception messages, tracebacks or statement logs.
+
+### Routes
 
 | Method and path | Success | Errors |
 |-----------------|---------|--------|
@@ -309,6 +342,7 @@ JSON logs through structlog, with no phone numbers or emails. Standard library l
 | `evaluation.completed` | `created`, `chunks`, `failed_chunks`, `duration_ms` |
 | `dispatch.completed` | `claimed`, `sent`, `retried`, `failed`, `duration_ms` |
 | `worker.stopping`, `worker.stopped` | `drained` |
+| `api.unhandled_error` | `error_type` |
 
 ## 14. Container
 

@@ -30,6 +30,7 @@ Este documento explica qué se decidió, por qué, qué se descartó y qué lím
 | 22 | Colección para pruebas manuales | Postman Collection v2.1, importable en Bruno | Cerrada |
 | 23 | Construcción de consultas | Lenguaje de expresiones de SQLAlchemy 2.0 | Cerrada |
 | 24 | Logs y salud | structlog con salida JSON, y endpoints `/health/live` y `/health/ready` | Cerrada |
+| 25 | Manejo de errores | Forma estándar de FastAPI con un `code` estable, un catálogo único y un solo mapeo a HTTP | Cerrada |
 
 El detalle de cada tabla y sus diagramas están en [ModeloDeDatos.md](ModeloDeDatos.md).
 
@@ -528,6 +529,35 @@ Usuarios y campos no tienen endpoints propios porque pertenecen a Agrobot.
 |-------------|------------|
 | `logging` de la biblioteca estándar con un formateador JSON propio | Es posible, pero obliga a escribir y probar ese formateador, y a bajar los campos a mano en cada evento |
 | Un solo endpoint de salud | Mezcla dos preguntas: un reinicio no arregla una base caída |
+
+## 25. Manejo de errores
+
+**Decisión:** los errores mantienen la [forma estándar de FastAPI](https://fastapi.tiangolo.com/tutorial/handling-errors/) y agregan un `code` estable, legible por máquina y en snake_case:
+
+```json
+{"detail": "Alert not found", "code": "alert_not_found"}
+```
+
+Los errores de validación conservan la lista de FastAPI, `{"detail": [{"type", "loc", "msg"}]}`, sin `input` ni `ctx`. Los mensajes están en inglés, empiezan con mayúscula, no terminan en punto y nunca incluyen valores del pedido ni de la base.
+
+**Cómo se organiza:**
+
+- **Catálogo.** `errors.py` define `DomainError` y cada error de la aplicación con su `code` y su mensaje. No sabe nada de HTTP: los servicios y la verificación del token lanzan estos errores, y fuera de la capa de API nada importa FastAPI ni Starlette. Un test lo verifica.
+- **Un solo mapeo.** `api/errors.py` asocia cada error a su estado HTTP: `404`, `409`, `401` o `503`. Un evento inexistente es una falla de validación de un campo, así que se responde como `422` en la forma de lista, con `type` `unknown_event_type` y `loc` `["body", "event_type"]`. Así cada `422` tiene una sola forma. Un test comprueba que todo error del catálogo tenga su mapeo.
+- **Handlers.** `register_error_handlers` registra todo desde `create_app`: los errores del catálogo, las excepciones HTTP de Starlette (token ausente, ruta inexistente, método no permitido), las de validación y cualquier otra excepción. Los routers ya no traducen excepciones.
+- **Error inesperado.** Responde `500` con `{"detail": "Internal server error", "code": "internal_error"}`, sin el texto de la excepción, y registra un único log `api.unhandled_error` con su tipo. Se implementa como middleware y no como handler de `Exception`, porque `ServerErrorMiddleware` de Starlette vuelve a lanzar la excepción después de llamar a ese handler, y uvicorn la registraría otra vez con su mensaje y su traceback.
+- **Documentación.** Cada ruta declara los errores que puede devolver, y sus respuestas en `/docs` se generan desde el catálogo: estado, descripción y un ejemplo con su `code`.
+- **Parámetros ocultos.** El engine usa `hide_parameters=True`, así que los valores enviados a la base, como teléfonos y emails, no aparecen en los mensajes de error, en los tracebacks ni en los logs de sentencias.
+
+**Por qué:** un cliente puede decidir según `code` sin depender del texto del mensaje, y los clientes de FastAPI y `/docs` siguen encontrando `detail` donde lo esperan. Con un solo catálogo y un solo mapeo, un error nuevo se agrega en un lugar y no puede quedar sin respuesta ni sin documentar.
+
+**Alternativas descartadas:**
+
+| Alternativa | Por qué no |
+|-------------|------------|
+| [RFC 9457, Problem Details](https://www.rfc-editor.org/rfc/rfc9457.html), el estándar de la IETF | Se evaluó y se descartó: se prefirió la forma estándar de FastAPI, que es la que esperan sus clientes y `/docs` |
+| Traducir excepciones en cada router | Repite el mapeo en cada ruta y permite que dos rutas respondan distinto al mismo error |
+| Handler de `Exception` para el `500` | Starlette vuelve a lanzar la excepción, y el error quedaría registrado dos veces, una con su texto |
 
 ---
 
