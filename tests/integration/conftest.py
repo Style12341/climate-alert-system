@@ -1,9 +1,15 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
+from datetime import timedelta
 
 import pytest
+from asgi_lifespan import LifespanManager
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
 from climate_alerts.agrobot.models import ClimateEventType
+from climate_alerts.agrobot.tokens import issue_token
+from climate_alerts.api.app import create_app
 from climate_alerts.config import Settings
 from climate_alerts.db import (
     Base,
@@ -37,3 +43,25 @@ async def clean_tables(sessions: SessionFactory) -> None:
     async with sessions() as session:
         await session.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
         await session.commit()
+
+
+@pytest.fixture
+def app(settings: Settings) -> FastAPI:
+    return create_app(settings)
+
+
+@pytest.fixture
+async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
+    async with LifespanManager(app) as manager:
+        transport = ASGITransport(app=manager.app)
+        async with AsyncClient(transport=transport, base_url="http://test") as http:
+            yield http
+
+
+@pytest.fixture
+def auth_headers(settings: Settings) -> Callable[[int], dict[str, str]]:
+    def build(user_id: int) -> dict[str, str]:
+        token = issue_token(user_id, settings, timedelta(minutes=5))
+        return {"Authorization": f"Bearer {token}"}
+
+    return build
