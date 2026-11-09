@@ -1,0 +1,10 @@
+# An allowlist, so a new local file (credentials above all) cannot reach the
+# build context unless it is named here.
+*
+!pyproject.toml
+!uv.lock
+!alembic.ini
+!src
+!migrations
+**/__pycache__
+**/*.pyc
