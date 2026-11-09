@@ -13,6 +13,7 @@ from climate_alerts.api.health import router as health_router
 from climate_alerts.config import Settings, get_settings
 from climate_alerts.db import build_engine, build_session_factory
 from climate_alerts.logs import configure_logging
+from climate_alerts.notifications.router import router as notifications_router
 
 
 def _renderable(value: object) -> object:
@@ -76,4 +77,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health_router)
     app.include_router(agrobot_router, prefix="/api/v1")
     app.include_router(alerts_router, prefix="/api/v1")
+    app.include_router(notifications_router, prefix="/api/v1")
     return app
