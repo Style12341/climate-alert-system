@@ -68,7 +68,7 @@ Lo que el enunciado pedía está hecho. Esto quedó sin hacer o sin probar:
 - **Supuestos sin datos reales.** Las 3 alertas por campo son una estimación.
 - **Bruno.** La importación se comprobó con su convertidor oficial, pero la colección no se ejecutó dentro de la aplicación.
 - **Reprocesar desde la API.** Reencolar una notificación fallida requiere un [`UPDATE` manual](docs/operacion.md#reencolar-una-notificación-fallida).
-- **Lo que rodea a un producto real.** Métricas, límite de pedidos, retención de `notifications`, revocación de tokens y otros temas, están en [Simplificaciones frente a producción](docs/Decisiones.md#simplificaciones-frente-a-producción).
+- **Lo que rodea a un producto real.** Métricas, límite de pedidos, retención de `notifications`, revocación de tokens y otros temas están en [Simplificaciones frente a producción](docs/Decisiones.md#simplificaciones-frente-a-producción).
 
 ## Documentación
 
