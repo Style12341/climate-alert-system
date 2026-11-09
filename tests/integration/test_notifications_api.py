@@ -3,16 +3,14 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from asgi_lifespan import LifespanManager
-from httpx import ASGITransport, AsyncClient
+from httpx import AsyncClient
 
 from climate_alerts.agrobot.models import Field, User
 from climate_alerts.alerts.models import Alert
-from climate_alerts.api.app import create_app
-from climate_alerts.config import Settings
 from climate_alerts.db import SessionFactory
 from climate_alerts.errors import DeliveryFailure
 from climate_alerts.notifications.models import Notification
+from climate_alerts.notifications.router import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from tests.integration.factories import (
     create_alert,
     create_field,
@@ -189,13 +187,26 @@ async def test_exactly_full_page_has_no_next_cursor(
     assert body["next_cursor"] is None
 
 
+async def test_default_page_size(
+    client: AsyncClient, sessions: SessionFactory, auth_headers: AuthHeaders
+) -> None:
+    user, _, alert = await owner_with_alert(sessions)
+    await add_notifications(sessions, alert, DEFAULT_PAGE_SIZE + 1)
+
+    response = await client.get(URL, headers=auth_headers(user.id))
+
+    body = response.json()
+    assert len(body["items"]) == DEFAULT_PAGE_SIZE
+    assert body["next_cursor"] is not None
+
+
 async def test_limit_at_maximum_is_accepted(
     client: AsyncClient, sessions: SessionFactory, auth_headers: AuthHeaders
 ) -> None:
     user, _, _ = await owner_with_alert(sessions)
 
     response = await client.get(
-        URL, params={"limit": 200}, headers=auth_headers(user.id)
+        URL, params={"limit": MAX_PAGE_SIZE}, headers=auth_headers(user.id)
     )
 
     assert response.status_code == 200
@@ -207,40 +218,19 @@ async def test_limit_above_maximum_returns_422(
     user, _, _ = await owner_with_alert(sessions)
 
     response = await client.get(
-        URL, params={"limit": 201}, headers=auth_headers(user.id)
+        URL, params={"limit": MAX_PAGE_SIZE + 1}, headers=auth_headers(user.id)
     )
 
     assert response.status_code == 422
     assert response.json() == {
         "detail": [
             {
-                "type": "limit_too_large",
+                "type": "less_than_equal",
                 "loc": ["query", "limit"],
-                "msg": "Limit must be at most 200",
+                "msg": f"Input should be less than or equal to {MAX_PAGE_SIZE}",
             }
         ]
     }
-
-
-async def test_page_size_comes_from_settings(
-    settings: Settings, sessions: SessionFactory, auth_headers: AuthHeaders
-) -> None:
-    user, _, alert = await owner_with_alert(sessions)
-    await add_notifications(sessions, alert, 3)
-    configured = settings.model_copy(
-        update={"default_page_size": 2, "max_page_size": 3}
-    )
-    headers = auth_headers(user.id)
-
-    async with LifespanManager(create_app(configured)) as manager:
-        transport = ASGITransport(app=manager.app)
-        async with AsyncClient(transport=transport, base_url="http://test") as http:
-            default_page = await http.get(URL, headers=headers)
-            over_maximum = await http.get(URL, params={"limit": 4}, headers=headers)
-
-    assert len(default_page.json()["items"]) == 2
-    assert over_maximum.status_code == 422
-    assert over_maximum.json()["detail"][0]["msg"] == "Limit must be at most 3"
 
 
 async def test_oversized_cursor_returns_422(

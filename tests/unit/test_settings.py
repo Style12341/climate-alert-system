@@ -44,8 +44,6 @@ def test_defaults_match_spec() -> None:
     assert s.dispatch_max_attempts == 8
     assert s.dispatch_backoff_base_seconds == 60
     assert s.dispatch_backoff_cap_seconds == 3600
-    assert s.default_page_size == 50
-    assert s.max_page_size == 200
     assert s.jwt_algorithm == "HS256"
     assert s.notification_channels == "whatsapp"
     assert s.enabled_channels == ("whatsapp",)
@@ -118,8 +116,6 @@ def test_rejects_unknown_log_level() -> None:
         "dispatch_max_attempts",
         "dispatch_backoff_base_seconds",
         "dispatch_backoff_cap_seconds",
-        "default_page_size",
-        "max_page_size",
         "db_pool_size",
         "db_command_timeout_seconds",
         "worker_shutdown_timeout_seconds",
@@ -139,15 +135,6 @@ def test_max_overflow_may_be_zero() -> None:
 def test_rejects_negative_max_overflow() -> None:
     with pytest.raises(ValidationError):
         build(db_max_overflow=-1)
-
-
-def test_rejects_default_page_above_maximum() -> None:
-    with pytest.raises(ValidationError, match="default_page_size"):
-        build(default_page_size=201, max_page_size=200)
-
-
-def test_accepts_default_page_equal_to_maximum() -> None:
-    assert build(default_page_size=200, max_page_size=200).default_page_size == 200
 
 
 def test_rejects_lease_shorter_than_the_slowest_batch() -> None:
