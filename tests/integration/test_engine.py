@@ -65,5 +65,9 @@ async def test_database_errors_do_not_carry_parameters(
         with pytest.raises(IntegrityError) as caught:
             await create_user(session, phone=phone)
 
-    # Tracebacks and logs render the exception through str().
+    # hide_parameters keeps bound values out of SQLAlchemy's own message.
     assert phone not in str(caught.value)
+    # It cannot reach the asyncpg exception the dialect raises `from`: its str()
+    # appends PostgreSQL's DETAIL line with the rejected value, so a printed
+    # traceback still shows it. That is why error logs record only the type.
+    assert phone in str(caught.value.orig.__cause__)

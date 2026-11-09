@@ -155,6 +155,8 @@ Business routes are under `/api/v1` and require a token.
 
 Errors keep FastAPI's standard shape, with one addition: a stable, machine-readable `code` in snake_case.
 
+**Rule.** Internal errors are logged, never returned to the client. No response body or header carries an exception's message or class name, a traceback, SQL, a driver message or internal configuration. A client only sees a message from `errors.py` or a fixed message from FastAPI and Starlette.
+
 - **HTTP errors:** `{"detail": "<message>", "code": "<code>"}`, declared in the OpenAPI document as `ErrorOut`. Messages are English, sentence case, without a trailing period, and never carry a value from the request or the database.
 - **Validation errors:** a `422` whose `detail` is a list of objects with only `type`, `loc` and `msg`. Runtime checks use the same shape: an unknown event has `type` `unknown_event_type` at `loc` `["body", "event_type"]`, and `limit` above the maximum has `type` `limit_too_large` at `["query", "limit"]`.
 
@@ -174,11 +176,11 @@ Errors keep FastAPI's standard shape, with one addition: a stable, machine-reada
 - `DomainError`: the mapped status and body. A `401` adds `WWW-Authenticate: Bearer`.
 - Starlette's `HTTPException`, which covers `HTTPBearer`'s missing token (`401` `unauthorized`), unknown routes (`404` `not_found`) and wrong methods (`405` `method_not_allowed`): `exc.detail`, the status phrase in snake_case as `code`, and the exception's headers.
 - `RequestValidationError`: the validation shape above.
-- Anything else: `500` `{"detail": "Internal server error", "code": "internal_error"}`, and one `api.unhandled_error` log with the error type only. This is a middleware rather than an `Exception` handler, because Starlette's `ServerErrorMiddleware` re-raises after calling that handler, and uvicorn would then log the error a second time with its message and traceback.
+- Anything else: `500` `{"detail": "Internal server error", "code": "internal_error"}`, and one `api.unhandled_error` log with the error type, the innermost frame, the method and the route template (section 13), never the message, a traceback or the raw path. This is a middleware rather than an `Exception` handler, because Starlette's `ServerErrorMiddleware` re-raises after calling that handler, and uvicorn would then log the error a second time with its message and traceback.
 
-**Documentation.** Each route declares the catalog errors it can return, and `error_responses(...)` builds its OpenAPI `responses`: status, description and an example per `code`, all from the error classes. Errors in the validation shape add nothing, since FastAPI already documents the `422`.
+**Documentation.** Each route declares by hand the catalog errors it can return, and `error_responses(...)` builds its OpenAPI `responses`: status, description and an example per `code`, all from the error classes. A `401` also lists `HTTPBearer`'s missing-token example, `{"detail": "Not authenticated", "code": "unauthorized"}`, next to `invalid_credentials`. Errors in the validation shape add nothing, since FastAPI already documents the `422`.
 
-**Database errors.** The engine uses `hide_parameters=True`, so bound values such as phone numbers and emails never appear in exception messages, tracebacks or statement logs.
+**Database errors.** The engine uses `hide_parameters=True`, which keeps bound values such as phone numbers and emails out of SQLAlchemy's own error messages and statement logs. It does not reach the driver's exception: the asyncpg dialect raises its error `from` the original asyncpg exception, so that exception stays chained, and its `str()` appends PostgreSQL's `DETAIL` line, for example `Key (phone)=(+549...) already exists`. A printed traceback can therefore still contain a constraint's value. That is why error logs record the exception type and location only, never the message or a traceback.
 
 ### Routes
 
@@ -201,7 +203,7 @@ Errors keep FastAPI's standard shape, with one addition: a stable, machine-reada
 | `AlertCreate` | `event_type: str`, `threshold: Decimal` (greater than 0, at most 100, two decimals) |
 | `AlertUpdate` | `threshold: Decimal`, same rules |
 | `AlertOut` | `id`, `field_id`, `event_type`, `threshold`, `created_at`, `updated_at` |
-| `NotificationOut` | `id`, `alert_id`, `field_id`, `event_type`, `forecast_date`, `channel`, `probability`, `threshold`, `status`, `attempts`, `last_error`, `created_at`, `sent_at` |
+| `NotificationOut` | `id`, `alert_id`, `field_id`, `event_type`, `forecast_date`, `channel`, `probability`, `threshold`, `status`, `attempts`, `last_error`, `created_at`, `sent_at`. `last_error` is null or a message from `DeliveryFailure` (section 9), and its OpenAPI description lists them |
 | `NotificationPage` | `items: list[NotificationOut]`, `next_cursor: int \| None` |
 
 **Creating an alert.** Check the field belongs to the user (else `404`). Check the event exists (else `422`). Then `INSERT ... ON CONFLICT (field_id, event_type) WHERE deleted_at IS NULL DO NOTHING RETURNING *`. No row returned means `409`. This avoids parsing driver exceptions and is safe under concurrent requests.
@@ -237,11 +239,12 @@ while not stopping:
 | Outcome | Update |
 |---------|--------|
 | Sent | `status = 'sent'`, `sent_at = now()`, `last_error = NULL` |
-| `PermanentDeliveryError` | `status = 'failed'`, `last_error` set |
-| Other error or timeout, attempts below the maximum | `next_attempt_at = now() + delay`, `last_error` set |
-| Other error or timeout, attempts at the maximum | `status = 'failed'`, `last_error` set |
-| No sender registered for the channel | Same as other error, with the same `last_error` |
-| Claimed with attempts above the maximum | `status = 'failed'` without sending. Earlier leases expired without a result |
+| `PermanentDeliveryError` | `status = 'failed'`, `last_error` = its `DeliveryFailure` |
+| Timeout, attempts below the maximum | `next_attempt_at = now() + delay`, `last_error` = `TIMED_OUT` |
+| Other error, attempts below the maximum | `next_attempt_at = now() + delay`, `last_error` = `FAILED` |
+| Timeout or other error, attempts at the maximum | `status = 'failed'`, same `last_error` |
+| No sender registered for the channel | Retried like other errors, `last_error` = `CHANNEL_UNAVAILABLE` |
+| Claimed with attempts above the maximum | `status = 'failed'` without sending, `last_error` = `ATTEMPTS_EXHAUSTED`. Earlier leases expired without a result |
 
 ```text
 delay = min(cap, base × 2^(attempts - 1)) × uniform(0.5, 1.0)
@@ -249,7 +252,15 @@ delay = min(cap, base × 2^(attempts - 1)) × uniform(0.5, 1.0)
 
 **Fencing.** Every outcome update includes `WHERE id = :id AND attempts = :attempts AND status = 'pending'`. A dispatcher whose lease expired cannot overwrite the result of the one that took over.
 
-`last_error` is truncated to 500 characters and contains only messages we control.
+**Delivery failure reasons.** `GET /api/v1/notifications` returns `last_error`, so it stores only a message from `DeliveryFailure` in `errors.py`, a fixed set with a stable code and an English message each. It never stores an exception's message, class name or traceback. Every failed attempt logs `dispatch.send_failed` (section 13).
+
+| Member | `code` | Message |
+|--------|--------|---------|
+| `NO_ADDRESS` | `recipient_has_no_address` | Recipient has no address for this channel |
+| `CHANNEL_UNAVAILABLE` | `channel_unavailable` | Channel not available |
+| `TIMED_OUT` | `delivery_timed_out` | Delivery timed out |
+| `ATTEMPTS_EXHAUSTED` | `attempts_exhausted` | Delivery attempts exhausted |
+| `FAILED` | `delivery_failed` | Delivery failed |
 
 **Reprocessing.** A `failed` notification can be requeued with one `UPDATE`, documented in the README. There is no endpoint.
 
@@ -280,7 +291,7 @@ class NotificationSender(Protocol):
     async def send(self, notification: OutboundNotification) -> None: ...
 ```
 
-Each sender chooses its own address. A missing address raises `PermanentDeliveryError`.
+Each sender chooses its own address. A missing address raises `PermanentDeliveryError(DeliveryFailure.NO_ADDRESS)`. `PermanentDeliveryError` takes a `DeliveryFailure`, not text, so a sender cannot pass provider text through to the API.
 
 Two simulated senders are registered, `whatsapp` and `email`. They log a structured event with the recipient masked. Compose enables both, so a reviewer sees per-channel rows and a `failed` row for a user without email. The code default remains `whatsapp`.
 
@@ -342,7 +353,8 @@ JSON logs through structlog, with no phone numbers or emails. Standard library l
 | `evaluation.completed` | `created`, `chunks`, `failed_chunks`, `duration_ms` |
 | `dispatch.completed` | `claimed`, `sent`, `retried`, `failed`, `duration_ms` |
 | `worker.stopping`, `worker.stopped` | `drained` |
-| `api.unhandled_error` | `error_type` |
+| `dispatch.send_failed` | `notification_id`, `channel`, `reason` (the `DeliveryFailure` code), `error_type` when an exception caused it. Never the message |
+| `api.unhandled_error` | `error_type`, `error_location` (`file:line:function` of the innermost frame), `method`, `route` (the matched path template, when there is one). Never the message, a traceback or the raw path |
 
 ## 14. Container
 

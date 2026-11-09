@@ -209,7 +209,7 @@ El dueño se obtiene a través del campo. Solo puede haber una alerta vigente po
 | `status` | `TEXT` | `pending`, `sent` o `failed` |
 | `attempts` | `INTEGER` | Se incrementa en cada reserva |
 | `next_attempt_at` | `TIMESTAMPTZ` | Próximo momento en que la fila puede reservarse |
-| `last_error` | `TEXT` | Último error de envío |
+| `last_error` | `TEXT` | Motivo del último intento fallido. Solo guarda un mensaje del conjunto fijo `DeliveryFailure`, nunca el texto de una excepción |
 | `created_at` | `TIMESTAMPTZ` | Por defecto, `now()` |
 | `sent_at` | `TIMESTAMPTZ` | Presente solo si `status` es `sent` |
 

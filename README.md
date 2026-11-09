@@ -93,7 +93,9 @@ Los errores de validación conservan la lista de FastAPI. Un evento inexistente 
 {"detail": [{"type": "unknown_event_type", "loc": ["body", "event_type"], "msg": "Unknown event type"}]}
 ```
 
-El catálogo de códigos y el razonamiento están en la [decisión 25](Decisiones.md#25-manejo-de-errores).
+Los errores internos se registran en los logs y nunca se devuelven al cliente. Por eso `last_error`, en `GET /api/v1/notifications`, solo muestra un motivo de un conjunto fijo, como `Delivery failed`.
+
+El catálogo completo de códigos está en la [sección 7 de `docs/SPEC.md`](docs/SPEC.md#7-api), y el razonamiento en la [decisión 25](Decisiones.md#25-manejo-de-errores).
 
 ## Usar la colección
 
