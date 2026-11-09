@@ -1,3 +1,4 @@
+import structlog
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
@@ -18,6 +19,10 @@ async def ready(session: SessionDep) -> dict[str, str]:
     try:
         await session.execute(select(1))
     except Exception as exc:
+        # The type only: driver messages can carry connection details.
+        structlog.get_logger().warning(
+            "health.ready_failed", error_type=type(exc).__name__
+        )
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database unavailable"
         ) from exc

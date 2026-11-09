@@ -2,6 +2,7 @@ from collections.abc import Callable
 
 from fastapi import FastAPI
 from httpx import AsyncClient
+from structlog.testing import capture_logs
 
 from climate_alerts.config import Settings
 from climate_alerts.db import build_engine, build_session_factory
@@ -57,8 +58,18 @@ async def test_ready_when_database_is_down(
     app.state.sessions = build_session_factory(engine)
 
     try:
-        response = await client.get("/health/ready")
+        with capture_logs() as logs:
+            response = await client.get("/health/ready")
     finally:
         await engine.dispose()
 
     assert response.status_code == 503
+    # Exact match: the driver's message can carry connection details, so only
+    # the exception type may be logged.
+    assert logs == [
+        {
+            "event": "health.ready_failed",
+            "error_type": "ConnectionRefusedError",
+            "log_level": "warning",
+        }
+    ]
