@@ -5,7 +5,7 @@ import jwt
 import pytest
 
 from climate_alerts.agrobot.tokens import issue_token
-from climate_alerts.auth import InvalidCredentials, verify_token
+from climate_alerts.auth import MAX_BIGINT, InvalidCredentials, verify_token
 from climate_alerts.config import Settings
 
 # 64 characters: PyJWT warns on HMAC keys shorter than the hash, and the
@@ -45,6 +45,12 @@ def test_valid_token_returns_user_id() -> None:
     assert verify_token(issue_token(7, s, timedelta(minutes=5)), s) == 7
 
 
+def test_largest_bigint_is_accepted() -> None:
+    token = encode({"sub": str(MAX_BIGINT), "exp": in_future()})
+
+    assert verify_token(token, s) == MAX_BIGINT
+
+
 @pytest.mark.parametrize(
     "build_token",
     [
@@ -66,6 +72,34 @@ def test_valid_token_returns_user_id() -> None:
         pytest.param(
             lambda: encode({"sub": "99999999999999999999", "exp": in_future()}),
             id="sub_above_bigint",
+        ),
+        pytest.param(
+            lambda: encode({"sub": str(MAX_BIGINT + 1), "exp": in_future()}),
+            id="sub_just_above_bigint",
+        ),
+        pytest.param(
+            lambda: encode({"sub": " 7 ", "exp": in_future()}), id="sub_with_spaces"
+        ),
+        pytest.param(
+            lambda: encode({"sub": "1_000", "exp": in_future()}),
+            id="sub_with_underscore",
+        ),
+        pytest.param(
+            lambda: encode({"sub": "\u0667", "exp": in_future()}),
+            id="sub_with_non_ascii_digit",
+        ),
+        pytest.param(
+            lambda: encode({"sub": "7\n", "exp": in_future()}),
+            id="sub_with_newline",
+        ),
+        pytest.param(
+            lambda: encode({"sub": "07", "exp": in_future()}), id="sub_leading_zero"
+        ),
+        pytest.param(
+            lambda: encode({"sub": 7, "exp": in_future()}), id="sub_not_a_string"
+        ),
+        pytest.param(
+            lambda: encode({"sub": "1" * 5000, "exp": in_future()}), id="sub_too_long"
         ),
         pytest.param(
             lambda: with_tampered_signature(encode({"sub": "7", "exp": in_future()})),

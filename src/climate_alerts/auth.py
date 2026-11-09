@@ -1,9 +1,15 @@
+import re
+
 import jwt
 
 from climate_alerts.config import Settings
 
 # Largest value of a PostgreSQL BIGINT, the type of every primary key.
 MAX_BIGINT = 2**63 - 1
+
+# int() also accepts spaces, underscores and non-ASCII digits, so it cannot
+# decide what a user id looks like.
+_USER_ID = re.compile(r"[1-9][0-9]*")
 
 
 class InvalidCredentials(Exception):
@@ -19,10 +25,14 @@ def verify_token(token: str, settings: Settings) -> int:
             algorithms=[settings.jwt_algorithm],
             options={"require": ["exp", "sub"]},
         )
-        user_id = int(claims["sub"])
+        subject = claims["sub"]
+        if _USER_ID.fullmatch(subject) is None:
+            raise InvalidCredentials
+        # Above Python's digit limit int() raises ValueError, so it stays here.
+        user_id = int(subject)
     except (jwt.InvalidTokenError, ValueError) as exc:
         raise InvalidCredentials from exc
 
-    if not 1 <= user_id <= MAX_BIGINT:
+    if user_id > MAX_BIGINT:
         raise InvalidCredentials
     return user_id
