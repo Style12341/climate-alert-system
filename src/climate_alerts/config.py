@@ -44,7 +44,6 @@ class Settings(BaseSettings):
     db_command_timeout_seconds: PositiveSeconds = 60
 
     worker_shutdown_timeout_seconds: PositiveSeconds = 25
-    seed_token_ttl_hours: PositiveSeconds = 24
     log_level: Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"] = "INFO"
 
     @field_validator("notification_channels")
