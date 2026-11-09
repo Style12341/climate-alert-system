@@ -43,29 +43,28 @@ Trabajé con Claude Code como herramienta. Yo definí el alcance, las prioridade
 
 | Etapa | Qué hice | Qué resultó |
 |-------|----------|-------------|
-| Contexto | Leí el enunciado, la oferta laboral y notas de prensa sobre FieldData | Una empresa que valora la simplicidad y un equipo chico: conviene código fácil de revisar |
+| Contexto | Leí el enunciado, la oferta laboral y notas de prensa sobre FieldData, la empresa que planteó el desafío | Una empresa que valora la simplicidad y un equipo chico: conviene código fácil de revisar |
 | Forma del sistema | Comparé un módulo, un servicio sobre la misma base y un microservicio | Módulo con procesos `api` y `worker`. Como Agrobot es hipotético, se simula |
 | Librería del job | Audité diez librerías: licencias del árbol completo, adopción, mantenimiento y soporte async | APScheduler 3.x. Celery es la más probada, pero no se ajusta a un stack async sin rodeos |
 | Modelo de datos | Revisé qué devuelven los proveedores reales de clima | Una fila por campo, día y evento. Ningún proveedor consultado informa probabilidad de helada, así que se deriva |
 | Volumen | Me pregunté qué pasa si los campos se duplican en un año y un solo job genera muchas notificaciones | Medí a 24.000 campos: evaluar en SQL mantiene la memoria plana y conviene trabajar por lotes |
-| Granularidad | Cuestioné si tenía sentido alertar por lote | No: una celda de pronóstico suele ser mucho más grande que un campo |
 | Canales | Me pregunté si una notificación podía salir por varios canales | Sí. El estado de entrega pasó a ser por canal, con una sola columna más |
 
 ## Correcciones en el camino
 
 **Un `NOT EXISTS` que parecía inofensivo.** Lo agregué a la evaluación para evitar trabajo innecesario. En el benchmark, una variante con 4 evaluadores tardó más de 27 minutos en lugar de 16 segundos. La tabla se había analizado vacía, y PostgreSQL eligió un plan que la recorría por completo para cada candidato. Sin esa condición, la unicidad sigue garantizada y el problema desaparece. Sin medir, no lo habría encontrado.
 
-**Campos que comparten celda.** Al principio di por hecho que pocos campos compartirían una celda del modelo meteorológico. Al calcular superficies para evaluar la granularidad por lote, los números mostraron otra cosa: en una celda de 9 km entran unos 13 campos promedio de Argentina.
+**Campos que comparten celda.** Al principio di por hecho que pocos campos compartirían una celda del modelo meteorológico. Al calcular superficies para decidir si alertar por lote agrícola, los números mostraron otra cosa: en una celda de 9 km entran unos 13 campos promedio de Argentina.
 
 La decisión de asociar los pronósticos a `field_id` se mantuvo, pero cambió su justificación. Ya no se apoya en que compartir celda sea raro, sino en la simplicidad, en la fidelidad al enunciado y en que la ingesta está fuera de alcance.
 
 **Una reserva que podía superar el tamaño del lote.** Con estadísticas desactualizadas, PostgreSQL podía volver a ejecutar la subconsulta de la reserva y tomar más filas de las pedidas. Lo reproduje en PostgreSQL 17 y pasé la selección a una CTE `MATERIALIZED`, que se evalúa una sola vez.
 
-**Una CTE que acotaba el lote pero recorría la tabla.** Cuestioné si la CTE `MATERIALIZED` de la reserva hacía falta. Al medirla, vi que mantenía el lote acotado, pero recorría la tabla entera en cada reserva: con 100.000 filas pendientes, unos 23 ms. Una sola sentencia con `ARRAY(...)` también respeta el lote y actualiza por clave primaria: unos 7 ms. La comparación se repite con `scripts/claim_forms.sql` (decisión 14). Pasé la reserva a esa sentencia.
+**Una CTE que acotaba el lote pero recorría la tabla.** Cuestioné si la CTE `MATERIALIZED` de la reserva hacía falta. Al medirla, vi que mantenía el lote acotado, pero recorría la tabla entera en cada reserva: con 100.000 filas pendientes, unos 23 ms. Una sola sentencia con `ARRAY(...)` también respeta el lote y actualiza por clave primaria: unos 7 ms. La comparación se repite con `scripts/claim_forms.sql` ([decisión 6](Decisiones.md#6-estado-de-entrega-next_attempt_at-como-plazo-de-reserva)). Pasé la reserva a esa sentencia.
 
-**La medición final no repitió un número.** Volví a medir con el código real. La evaluación coincidió con lo esperado, pero la entrega tardó 917 s en lugar de 34 a 40 s. Después de cambiar la reserva volví a medir, esta vez separando los dos pasos: 8,71 s de evaluación y 863 s de entrega, de los que 24,0 s fueron la reserva y 836,9 s el registro de resultados. El benchmark inicial registraba cada lote con un solo `UPDATE`, y el código final lo hace fila por fila. La velocidad sigue siendo muy superior al límite del proveedor, así que lo dejé como está y lo registré en [Decisiones.md](Decisiones.md#12-volumen-y-batching).
+**La medición final no repitió un número.** Volví a medir con el código real. La evaluación coincidió con lo esperado, pero la entrega tardó 917 s en lugar de 34 a 40 s. Después de cambiar la reserva volví a medir, esta vez separando los dos pasos: 8,71 s de evaluación y 863 s de entrega, de los que 24,0 s fueron la reserva y 836,9 s el registro de resultados. El benchmark inicial registraba cada lote con un solo `UPDATE`, y el código final lo hace fila por fila. La velocidad sigue siendo muy superior al límite del proveedor, así que lo dejé como está y lo registré en [Decisiones.md](Decisiones.md#10-volumen-y-batching).
 
-**Lo que encontró la integración continua.** La primera ejecución local encontró 7 vulnerabilidades HIGH con corrección en la imagen base, ninguna en las dependencias de la aplicación: zlib1g, y msgpack, setuptools y urllib3 incluidos dentro de pip. Actualicé los paquetes de Debian en la imagen y eliminé pip. La revisión de seguridad encontró además que el escaneo de ZAP, tal como estaba escrito, nunca podía fallar: usaba `-I` y no tenía archivo de reglas. Quité `-I`, agregué `.zap/rules.tsv` y comprobé ambos casos: sin el archivo, el escaneo falla por las dos alertas WARN; con él, esas dos se ignoran y cualquier otra alerta hace fallar el trabajo.
+**Lo que encontró la integración continua.** La primera ejecución local encontró 7 vulnerabilidades HIGH con corrección en la imagen base, ninguna en las dependencias de la aplicación: zlib1g, y msgpack, setuptools y urllib3 incluidos dentro de pip. Actualicé los paquetes de Debian en la imagen y eliminé pip. La revisión de seguridad encontró además que el escaneo de ZAP, tal como estaba escrito, nunca podía fallar: usaba `-I` y no tenía archivo de reglas. Quité `-I`, agregué `.zap/rules.tsv` y comprobé ambos casos: sin el archivo, el escaneo falla por las alertas WARN; con él, las tres que lista (10021, 90004 y 10106) se ignoran y cualquier otra alerta hace fallar el trabajo.
 
 ## Estado final
 

@@ -43,8 +43,8 @@ COPYLEFT = re.compile(
 # package name -> where the justification lives. Add a package only after
 # writing down why its license is acceptable.
 REVIEWED_COPYLEFT: dict[str, str] = {
-    "certifi": "docs/Decisiones.md, decision 3: MPL-2.0, dev only, not in the image",
-    "pathspec": "docs/Decisiones.md, decision 3: MPL-2.0, dev only, not in the image",
+    "certifi": "docs/Decisiones.md, decision 2: MPL-2.0, dev only, not in the image",
+    "pathspec": "docs/Decisiones.md, decision 2: MPL-2.0, dev only, not in the image",
 }
 UNKNOWN = "unknown"
 

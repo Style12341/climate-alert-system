@@ -1,4 +1,4 @@
--- Compares the forms of the dispatch claim (decision 14 in docs/Decisiones.md).
+-- Compares the forms of the dispatch claim (decision 6 in docs/Decisiones.md).
 --
 -- What it does: on an empty, throwaway database it creates a minimal copy of
 -- the schema, then for each claim form prints the plan and how many rows one

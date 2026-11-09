@@ -4,7 +4,7 @@ Un usuario configura alertas sobre sus campos, con un evento climático (helada,
 
 > **[Guía para revisar el proyecto](https://claude.ai/artifact/7sANHK2Q4wZWWHGFnoRBPz)**
 >
-> El mejor lugar para entender el sistema, sus decisiones y el proceso de trabajo, con diagramas:
+> Una sola página con el sistema, sus decisiones y el proceso de trabajo, con diagramas:
 > [Resumen](https://claude.ai/artifact/7sANHK2Q4wZWWHGFnoRBPz#resumen) ·
 > [Arquitectura](https://claude.ai/artifact/7sANHK2Q4wZWWHGFnoRBPz#arquitectura) ·
 > [Flujo](https://claude.ai/artifact/7sANHK2Q4wZWWHGFnoRBPz#flujo) ·
@@ -50,11 +50,11 @@ uv run pytest
 | Tema | Decisión | Motivo |
 |------|----------|--------|
 | [Forma del sistema](docs/Decisiones.md#1-forma-del-sistema-módulo-de-agrobot) | Módulo con procesos `api` y `worker` | Aprovecha los datos existentes sin sumar un servicio |
-| [Job periódico](docs/Decisiones.md#3-job-periódico-apscheduler-3x) | APScheduler 3.x | Async nativo, sin broker, licencia MIT |
-| [Datos climáticos](docs/Decisiones.md#4-datos-climáticos-una-fila-por-campo-día-y-evento) | Una fila por campo, día y evento | Es lo que describe el enunciado, y sumar eventos no requiere migraciones |
-| [Duplicados](docs/Decisiones.md#7-deduplicación-una-notificación-por-alerta-fecha-y-canal) | Una notificación por alerta, fecha y canal | La base lo garantiza, incluso con varios workers |
-| [Entrega](docs/Decisiones.md#8-entrega-outbox-con-entrega-al-menos-una-vez) | La notificación funciona como outbox | Se guarda antes de enviarse y se reintenta |
-| [Volumen](docs/Decisiones.md#12-volumen-y-batching) | Evaluación en SQL por lotes de 5.000 alertas | La memoria no depende del volumen, medido a 24.000 campos |
+| [Job periódico](docs/Decisiones.md#2-job-periódico-apscheduler-3x) | APScheduler 3.x | Async nativo, sin broker, licencia MIT |
+| [Datos climáticos](docs/Decisiones.md#3-datos-climáticos-una-fila-por-campo-día-y-evento) | Una fila por campo, día y evento | Es lo que describe el enunciado, y sumar eventos no requiere migraciones |
+| [Duplicados](docs/Decisiones.md#4-deduplicación-una-notificación-por-alerta-fecha-y-canal) | Una notificación por alerta, fecha y canal | La base lo garantiza, incluso con varios workers |
+| [Entrega](docs/Decisiones.md#5-entrega-outbox-con-entrega-al-menos-una-vez) | La notificación funciona como outbox | Se guarda antes de enviarse y se reintenta |
+| [Volumen](docs/Decisiones.md#10-volumen-y-batching) | Evaluación en SQL por lotes de 5.000 alertas | La memoria no depende del volumen, medido a 24.000 campos |
 
 Stack: Python 3.14, FastAPI, SQLAlchemy 2 async, PostgreSQL 17, Alembic, APScheduler 3.x y PyJWT.
 
@@ -76,5 +76,5 @@ Lo que el enunciado pedía está hecho. Esto quedó sin hacer o sin probar:
 - [`docs/ModeloDeDatos.md`](docs/ModeloDeDatos.md): esquema, reglas de la base y diagramas.
 - [`docs/procedimiento.md`](docs/procedimiento.md): cómo se encaró el trabajo y qué cambió en el camino.
 - [`docs/operacion.md`](docs/operacion.md): correrlo sin Docker, tokens, colección, errores, reencolado, scripts e integración continua.
-- [`docs/PRD.md`](docs/PRD.md), [`docs/SPEC.md`](docs/SPEC.md) y [`docs/PLAN.md`](docs/PLAN.md): documentos de trabajo, en inglés.
+- [`docs/PRD.md`](docs/PRD.md), [`docs/SPEC.md`](docs/SPEC.md) y [`docs/PLAN.md`](docs/PLAN.md): documentos de trabajo en inglés, escritos antes del código.
 - [`statement.md`](statement.md): el enunciado.
