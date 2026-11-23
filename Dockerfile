@@ -1,7 +1,7 @@
 # One image for all four processes. It has no CMD on purpose: compose.yaml
 # names the command of each service, and no process is a natural default.
 
-FROM python:3.14-slim AS builder
+FROM python:3.15-slim AS builder
 
 COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /usr/local/bin/uv
 
@@ -26,7 +26,7 @@ COPY src ./src
 RUN ["uv", "sync", "--locked", "--no-dev", "--no-editable"]
 
 
-FROM python:3.14-slim AS runtime
+FROM python:3.15-slim AS runtime
 
 RUN ["useradd", "--uid", "10001", "--no-create-home", "--shell", "/usr/sbin/nologin", "app"]
 
